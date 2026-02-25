@@ -1,4 +1,4 @@
-Division,Page type,Additional option,segment Name(Visit),Segment id(Visit),segment Name(Cart),Segment id(Cart),segment Name(Order),Segment id(Order)
+ï»¿Division,Page type,Additional option,segment Name(Visit),Segment id(Visit),segment Name(Cart),Segment id(Cart),segment Name(Order),Segment id(Order)
 Total,PF,N/A,(Test calculator) PF Visit,s200001591_699d4bb8bd7205268da0d6db,(Test calculator) PF Visit > Cart,s200001591_699d4bd6decd05583abcecb1,(Test calculator) PF Visit > Order,s200001591_699d4be77f18801c94af2b13
 Total,Buy PD,N/A,(Test calculator) PD Visits,s200001591_699d4c0cdecd05583abcecb3,(Test calculator) PD Visits > Cart,s200001591_699d4c2adecd05583abcecb4,(Test calculator) PD Visits > Order,s200001591_699d4c43bd7205268da0d6de
 Total,Offer,N/A,(Test calculator) Offer visits,s200001591_699d4c65bd7205268da0d6df,(Test calculator) Offer visits > Cart,s200001591_699d4c827f18801c94af2b14,(Test calculator) Offer visits > Order,s200001591_699d4c98bd7205268da0d6e0
@@ -8,7 +8,7 @@ MX,Buy PD (F.BC),Smartphone,(Test calculator) Smartphone F.BC Buying PD,s2000015
 Total,Search Page,N/A,(Test calculator) Search,s200001591_699d0bce7f18801c94af2a38,(Test calculator) Search > Cart,s200001591_699d0be5bd7205268da0d5dc,(Test calculator) Search > Order,s200001591_699d0bf853caaf10d471a96e
 Total,PD/MKT PD,N/A,(Test calculator) PD/MKT PD,s200001591_699d0d23bd7205268da0d5e2,(Test calculator) PD/MKT PD > Cart,s200001591_699d0e1bcb765b3521fa5a58,(Test calculator) PD/MKT PD > Order,s200001591_699d0e34cd2ab45795b6b6ca
 MX,PFS,N/A,(Test calculator) MX PFS,s200001591_699c0d94a273fd3d80985e0e,(Test?calculator)?MX?PFS?>?MX Cart,s200001591_699c12b5a273fd3d80985e12,(Test?calculator)?MX?PFS?>?MX?Order,s200001591_699c12c6eb9aed473539d1f0
-MX,PF,N/A,(Test calculator) MX PF ¼¼±×¸ÕÆ®,s200001591_699c09d8d5d044096dd62135,(Test?calculator)?MX?PF?¼¼±×¸ÕÆ®?> MX Cart,s200001591_699c125e2f5c912e350db024,(Test?calculator)?MX?PF?¼¼±×¸ÕÆ®?> MX Order,s200001591_699c1277a273fd3d80985e11
+MX,PF,N/A,(Test calculator) MX PF ì„¸ê·¸ë¨¼íŠ¸,s200001591_699c09d8d5d044096dd62135,(Test?calculator)?MX?PF?ì„¸ê·¸ë¨¼íŠ¸?> MX Cart,s200001591_699c125e2f5c912e350db024,(Test?calculator)?MX?PF?ì„¸ê·¸ë¨¼íŠ¸?> MX Order,s200001591_699c1277a273fd3d80985e11
 MX,PD/MKT PD,N/A,(Test calculator) MX PD/MKT PD,s200001591_699d2ee92f5c912e350db2c8,(Test calculator) MX PD/MKT PD > MX Cart,s200001591_699d2f5c2f5c912e350db2cd,(Test calculator) MX PD/MKT PD > MX Order,s200001591_699d2f7ba273fd3d809860e7
 MX,PCD,N/A,(Test calculator) MX PCD,s200001591_699d2d92a273fd3d809860d7,(Test calculator) MX PCD > MX Cart,s200001591_699d2dada273fd3d809860d8,(Test calculator) MX PCD > MX Order,s200001591_699d2dc72f5c912e350db2c6
 MX,Buy PD (F.BC),N/A,(Test calculator) MX F.BC Buying PD,s200001591_699d322ea273fd3d809860f6,(Test calculator) MX F.BC Buying PD > MX Cart,s200001591_699d32bb40c2ce320b7402f3,(Test calculator) MX F.BC Buying PD > MX Order,s200001591_699d32d7f086216649916453
