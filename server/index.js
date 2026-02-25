@@ -1,8 +1,9 @@
 import express from 'express';
-import { getOptionsAndMapping, getSegmentIds } from './segmentLoader.js';
-import { fetchV1Visits } from './aaReporting.js';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getOptionsAndMapping, getSegmentIds } from './segmentLoader.js';
+import { fetchV1Visits } from './aaReporting.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -103,9 +104,9 @@ app.post('/api/v1-data', async (req, res) => {
   }
 });
 
-// 프로덕션: Vite 빌드 결과(dist) 서빙 + SPA 폴백 (API 라우트 뒤에 둠)
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(__dirname, '..', 'dist');
+// dist 폴더가 있으면 Vite 빌드 결과 서빙 (Render 등 배포 환경)
+const distPath = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
   app.get('*', (req, res) => {
     res.sendFile(path.join(distPath, 'index.html'));
