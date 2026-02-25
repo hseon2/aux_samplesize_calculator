@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FileUpload } from './components/FileUpload';
+import { ApiDataLoader } from './components/ApiDataLoader';
 import { DataPreview } from './components/DataPreview';
 import { InputForm, InputParams } from './components/InputForm';
 import { SegmentSelector } from './components/SegmentSelector';
@@ -12,6 +13,7 @@ import {
 } from './utils/parser';
 import { 
   calculateAll, 
+  calculateDays,
   CalculationParams,
   TestDurationResult 
 } from './utils/calculator';
@@ -27,7 +29,8 @@ function App() {
   const [results, setResults] = useState<TestDurationResult[]>([]);
   const [error, setError] = useState<string>('');
   const [view, setView] = useState<'setup' | 'result'>('setup');
-  
+  const [dataSource, setDataSource] = useState<'file' | 'api'>('file');
+
   const [inputParams, setInputParams] = useState<InputParams>({
     rangeDays: 30,
     startDate: '',
@@ -37,14 +40,24 @@ function App() {
     statisticalPower: 0.80
   });
 
-  const handleFileParsed = (data: RawDataRow[]) => {
+  const handleDataLoaded = (data: RawDataRow[], meta?: { startDate: string; endDate: string }) => {
     setRawData(data);
     setError('');
     setView('setup');
     const labels = extractSegmentLabels(data);
     setSegmentLabels(labels);
     
-    // 자동으로 첫 번째 라벨 선택 시도
+    if (meta?.startDate && meta?.endDate) {
+      const start = new Date(meta.startDate);
+      const end = new Date(meta.endDate);
+      setInputParams((prev) => ({
+        ...prev,
+        startDate: meta.startDate,
+        endDate: meta.endDate,
+        rangeDays: calculateDays(start, end),
+      }));
+    }
+    
     const visitsLabel = labels.find(l => l.type === 'visits');
     const cartAddLabel = labels.find(l => l.type === 'cartAdd');
     const orderLabel = labels.find(l => l.type === 'order');
@@ -153,7 +166,34 @@ function App() {
 
       {view === 'setup' && (
         <>
-          <FileUpload onFileParsed={handleFileParsed} onError={setError} />
+          <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 'bold' }}>데이터 입력 방식</span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="dataSource"
+                checked={dataSource === 'file'}
+                onChange={() => { setDataSource('file'); setRawData([]); setError(''); }}
+              />
+              CSV/Excel 파일 업로드
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="dataSource"
+                checked={dataSource === 'api'}
+                onChange={() => { setDataSource('api'); setRawData([]); setError(''); }}
+              />
+              API로 불러오기
+            </label>
+          </div>
+
+          {dataSource === 'file' && (
+            <FileUpload onFileParsed={handleDataLoaded} onError={setError} />
+          )}
+          {dataSource === 'api' && (
+            <ApiDataLoader onDataLoaded={handleDataLoaded} onError={setError} />
+          )}
 
           {rawData.length > 0 && (
             <>
