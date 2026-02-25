@@ -125,13 +125,30 @@ function getHeaderIndex(headerRow) {
   return indices;
 }
 
+// 첫 행이 CSV 헤더가 아니라 이진/다른 형식인지 간단 검사
+function looksLikeBinaryOrWrongFormat(headerRow) {
+  if (!headerRow?.length) return true;
+  const first = String(headerRow[0] ?? '');
+  if (/\x00|NASCA|DRM FILE|^\s*</.test(first)) return true;
+  const hasControlChars = /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(first);
+  const noCommaOrSemicolon = headerRow.length === 1 && !first.includes(',') && !first.includes(';');
+  return hasControlChars || (noCommaOrSemicolon && first.length > 200);
+}
+
 export function getOptionsAndMapping() {
   const { rows, error } = loadCsv();
   if (error || !rows) return { options: null, mapping: null, error: error || 'CSV 로드 실패' };
   const header = rows[0].map(normalizeHeader);
   const idx = getHeaderIndex(rows[0]);
   if (idx['사업부'] == null || idx['페이지 타입'] == null || idx['상세 타입'] == null) {
-    const hint = rows[0]?.length ? ` 읽은 헤더: [${rows[0].map((c) => JSON.stringify(String(c).trim())).join(', ')}]` : '';
+    if (looksLikeBinaryOrWrongFormat(rows[0])) {
+      return {
+        options: null,
+        mapping: null,
+        error: "Segment define_v2.csv가 CSV 텍스트가 아닌 것 같습니다. Excel에서 'CSV UTF-8(쉼표로 분리)'로 저장했는지 확인하고, server 폴더의 파일을 교체한 뒤 다시 배포해 주세요.",
+      };
+    }
+    const hint = rows[0]?.length ? ` 읽은 헤더: [${rows[0].map((c) => JSON.stringify(String(c).trim().slice(0, 80))).join(', ')}]` : '';
     return { options: null, mapping: null, error: "헤더에 '사업부', '페이지 타입', '상세 타입' 컬럼이 필요합니다." + hint };
   }
   const hasThree =
