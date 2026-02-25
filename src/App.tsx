@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { ApiDataLoader } from './components/ApiDataLoader';
 import { DataPreview } from './components/DataPreview';
@@ -25,7 +25,7 @@ function App() {
   const [selectedCartAdd, setSelectedCartAdd] = useState<string>('');
   const [selectedOrder, setSelectedOrder] = useState<string>('');
   const [siteCodes, setSiteCodes] = useState<string[]>([]);
-  const [parsedData, setParsedData] = useState<ReturnType<typeof parseData>>([]);
+  const [, setParsedData] = useState<ReturnType<typeof parseData>>([]);
   const [results, setResults] = useState<TestDurationResult[]>([]);
   const [error, setError] = useState<string>('');
   const [view, setView] = useState<'setup' | 'result'>('setup');
