@@ -133,156 +133,311 @@ function App() {
     }
   };
 
-  const canCalculate = 
-    selectedVisits && 
-    selectedCartAdd && 
-    selectedOrder && 
+  const canCalculate =
+    selectedVisits &&
+    selectedCartAdd &&
+    selectedOrder &&
     (inputParams.rangeDays > 0 || (inputParams.startDate && inputParams.endDate)) &&
     siteCodes.length > 0;
 
+  // 단계: 1=데이터 입력, 2=설정 및 계산, 3=결과
+  const step = view === 'result' ? 3 : rawData.length > 0 ? 2 : 1;
+
+  // ── 디자인 토큰 ──────────────────────────────────────────
+  const ds = {
+    primary: '#2563eb',
+    primaryHover: '#1d4ed8',
+    primaryDisabled: '#93c5fd',
+    secondary: '#374151',
+    secondaryHover: '#1f2937',
+    surface: '#ffffff',
+    surfaceHover: '#f9fafb',
+    pageBg: '#f3f4f6',
+    border: '#e5e7eb',
+    borderFocus: '#2563eb',
+    textPrimary: '#111827',
+    textMuted: '#6b7280',
+    textLight: '#9ca3af',
+    errorBg: '#fef2f2',
+    errorBorder: '#fecaca',
+    errorText: '#dc2626',
+    infoBg: '#eff6ff',
+    infoBorder: '#bfdbfe',
+    infoText: '#1e40af',
+    successBg: '#f0fdf4',
+    successBorder: '#bbf7d0',
+    successText: '#166534',
+    cardShadow: '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)',
+    cardRadius: '12px',
+  } as const;
+
+  const stepDotStyle = (s: number): React.CSSProperties => ({
+    width: 28,
+    height: 28,
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '13px',
+    fontWeight: 700,
+    flexShrink: 0,
+    backgroundColor: step === s ? ds.primary : step > s ? '#d1fae5' : '#e5e7eb',
+    color: step === s ? '#fff' : step > s ? '#065f46' : ds.textMuted,
+    transition: 'all 0.2s ease',
+  });
+
+  const stepLabelStyle = (s: number): React.CSSProperties => ({
+    fontSize: '13px',
+    fontWeight: step === s ? 700 : 500,
+    color: step === s ? ds.textPrimary : step > s ? '#059669' : ds.textMuted,
+    cursor: (s < step || (s === 2 && step === 3)) ? 'pointer' : 'default',
+    transition: 'color 0.2s ease',
+  });
+
+  const btnStyle = (variant: 'primary' | 'secondary', disabled?: boolean): React.CSSProperties => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '9px 20px',
+    fontSize: '14px',
+    fontWeight: 600,
+    borderRadius: '8px',
+    border: 'none',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    transition: 'background 0.15s ease',
+    ...(variant === 'primary'
+      ? { backgroundColor: disabled ? ds.primaryDisabled : ds.primary, color: '#fff' }
+      : { backgroundColor: ds.secondary, color: '#fff' }),
+  });
+
+  const ctaButton = (label: string, onClick: () => void, disabled?: boolean, primary = true) => (
+    <button onClick={onClick} disabled={disabled} style={btnStyle(primary ? 'primary' : 'secondary', disabled)}>
+      {label}
+    </button>
+  );
+
+  const card: React.CSSProperties = {
+    backgroundColor: ds.surface,
+    borderRadius: ds.cardRadius,
+    border: `1px solid ${ds.border}`,
+    boxShadow: ds.cardShadow,
+    padding: '24px',
+    marginBottom: '16px',
+  };
+
   return (
-    <div style={{ 
-      maxWidth: '1400px', 
-      margin: '0 auto', 
-      padding: '20px',
-      fontFamily: 'Arial, sans-serif'
-    }}>
-      <h1 style={{ textAlign: 'center', color: '#333', marginBottom: '30px' }}>
-        AB Test Sample Size Calculator
-      </h1>
-
-      {error && view === 'setup' && (
+    <div style={{ minHeight: '100vh', backgroundColor: ds.pageBg }}>
+      {/* ── 네비게이션 바 ── */}
+      <header style={{
+        backgroundColor: '#1f2937',
+        borderBottom: '1px solid #111827',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+      }}>
         <div style={{
-          padding: '15px',
-          backgroundColor: '#fee',
-          border: '1px solid #fcc',
-          borderRadius: '4px',
-          color: '#c33',
-          marginBottom: '20px'
+          maxWidth: '1400px',
+          margin: '0 auto',
+          padding: '0 24px',
+          height: '56px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
         }}>
-          {error}
+          <span style={{ fontSize: '18px' }}>🧪</span>
+          <span style={{
+            fontSize: '16px',
+            fontWeight: 700,
+            color: '#f9fafb',
+            letterSpacing: '-0.02em',
+          }}>
+            AB Test Sample Size Calculator
+          </span>
         </div>
-      )}
+      </header>
 
-      {view === 'setup' && (
-        <>
-          <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 'bold' }}>데이터 입력 방식</span>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-              <input
-                type="radio"
-                name="dataSource"
-                checked={dataSource === 'file'}
-                onChange={() => { setDataSource('file'); setRawData([]); setError(''); }}
-              />
-              CSV/Excel 파일 업로드
-            </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-              <input
-                type="radio"
-                name="dataSource"
-                checked={dataSource === 'api'}
-                onChange={() => { setDataSource('api'); setRawData([]); setError(''); }}
-              />
-              API로 불러오기
-            </label>
-          </div>
+      {/* ── 메인 콘텐츠 ── */}
+      <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px' }}>
 
-          {dataSource === 'file' && (
-            <FileUpload onFileParsed={handleDataLoaded} onError={setError} />
-          )}
-          {dataSource === 'api' && (
-            <ApiDataLoader onDataLoaded={handleDataLoaded} onError={setError} />
-          )}
-
-          {rawData.length > 0 && (
-            <>
-              <DataPreview data={rawData} />
-              
-              <InputForm params={inputParams} onChange={setInputParams} />
-              
-              <SegmentSelector
-                labels={segmentLabels}
-                selectedVisits={selectedVisits}
-                selectedCartAdd={selectedCartAdd}
-                selectedOrder={selectedOrder}
-                onVisitsChange={handleVisitsChange}
-                onCartAddChange={setSelectedCartAdd}
-                onOrderChange={setSelectedOrder}
-              />
-
-              {siteCodes.length > 0 && (
-                <div style={{ 
-                  marginBottom: '20px',
-                  padding: '15px',
-                  backgroundColor: '#e8f4f8',
-                  borderRadius: '4px'
-                }}>
-                  <strong>발견된 Site Code 수: {siteCodes.length}개</strong>
-                </div>
-              )}
-
-              <button
-                onClick={handleCalculate}
-                disabled={!canCalculate}
-                style={{
-                  padding: '12px 24px',
-                  fontSize: '16px',
-                  backgroundColor: canCalculate ? '#4a90e2' : '#ccc',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: canCalculate ? 'pointer' : 'not-allowed',
-                  fontWeight: 'bold',
-                  marginBottom: '20px'
-                }}
-              >
-                계산하기
-              </button>
-            </>
-          )}
-        </>
-      )}
-
-      {view === 'result' && (
-        <>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px' }}>
-            <button
-              onClick={() => setView('setup')}
-              style={{
-                padding: '10px 14px',
-                fontSize: '14px',
-                backgroundColor: '#111827',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 700
-              }}
+        {/* ── 스텝 바 + CTA ── */}
+        <div style={{
+          ...card,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '16px',
+          padding: '16px 24px',
+          marginBottom: '24px',
+        }}>
+          {/* 스텝 인디케이터 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {/* Step 1 */}
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: step > 1 ? 'pointer' : 'default' }}
+              onClick={() => { if (step > 1) { setRawData([]); setView('setup'); } }}
             >
-              ← 뒤로가기
-            </button>
-            <div style={{ color: '#6b7280', fontSize: '14px' }}>
-              산출 완료된 결과만 표시됩니다.
+              <div style={stepDotStyle(1)}>1</div>
+              <span style={stepLabelStyle(1)}>데이터 입력</span>
+            </div>
+            <span style={{ color: ds.border, fontSize: '18px', margin: '0 4px' }}>›</span>
+            {/* Step 2 */}
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: step === 3 ? 'pointer' : 'default' }}
+              onClick={() => { if (step === 3) setView('setup'); }}
+            >
+              <div style={stepDotStyle(2)}>2</div>
+              <span style={stepLabelStyle(2)}>설정 및 계산</span>
+            </div>
+            <span style={{ color: ds.border, fontSize: '18px', margin: '0 4px' }}>›</span>
+            {/* Step 3 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={stepDotStyle(3)}>3</div>
+              <span style={stepLabelStyle(3)}>결과</span>
             </div>
           </div>
 
-          {results.length > 0 ? (
-            <ResultTable results={results} />
-          ) : (
-            <div style={{
-              padding: '15px',
-              backgroundColor: '#fee',
-              border: '1px solid #fcc',
-              borderRadius: '4px',
-              color: '#c33',
-              marginBottom: '20px'
-            }}>
-              결과가 없습니다. 뒤로가서 다시 계산해주세요.
+          {/* CTA 버튼 */}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            {step === 2 && (
+              <>
+                {ctaButton('← 뒤로가기', () => { setRawData([]); setView('setup'); }, false, false)}
+                {ctaButton('계산하기', handleCalculate, !canCalculate)}
+              </>
+            )}
+            {step === 3 && ctaButton('← 뒤로가기', () => setView('setup'), false, false)}
+          </div>
+        </div>
+
+        {/* ── 에러 배너 ── */}
+        {error && view === 'setup' && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            padding: '14px 16px',
+            backgroundColor: ds.errorBg,
+            border: `1px solid ${ds.errorBorder}`,
+            borderRadius: '8px',
+            color: ds.errorText,
+            fontSize: '14px',
+            marginBottom: '20px',
+          }}>
+            <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+            {error}
+          </div>
+        )}
+
+        {/* ── Step 1: 데이터 입력 ── */}
+        {step === 1 && (
+          <section>
+            <div style={card}>
+              {/* 소스 선택 탭 */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+                {(['file', 'api'] as const).map((src) => (
+                  <button
+                    key={src}
+                    onClick={() => { setDataSource(src); setRawData([]); setError(''); }}
+                    style={{
+                      padding: '8px 20px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      border: `1.5px solid ${dataSource === src ? ds.primary : ds.border}`,
+                      borderRadius: '20px',
+                      cursor: 'pointer',
+                      backgroundColor: dataSource === src ? ds.infoBg : ds.surface,
+                      color: dataSource === src ? ds.primary : ds.textMuted,
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {src === 'file' ? '📂 CSV/Excel 파일 업로드' : '🔗 API로 불러오기'}
+                  </button>
+                ))}
+              </div>
+              {dataSource === 'file' && <FileUpload onFileParsed={handleDataLoaded} onError={setError} />}
+              {dataSource === 'api' && <ApiDataLoader onDataLoaded={handleDataLoaded} onError={setError} />}
             </div>
-          )}
-        </>
-      )}
+          </section>
+        )}
+
+        {/* ── Step 2: 설정 및 계산 ── */}
+        {step === 2 && (
+          <section>
+            {rawData.length > 0 ? (
+              <>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '12px 16px',
+                  backgroundColor: ds.infoBg,
+                  border: `1px solid ${ds.infoBorder}`,
+                  borderRadius: '8px',
+                  color: ds.infoText,
+                  fontSize: '13px',
+                  marginBottom: '16px',
+                }}>
+                  <span>ℹ️</span>
+                  <span>파라미터를 설정한 뒤 상단 <strong>계산하기</strong>를 누르세요.</span>
+                </div>
+                <InputForm params={inputParams} onChange={setInputParams} />
+                <DataPreview data={rawData} />
+                <SegmentSelector
+                  labels={segmentLabels}
+                  selectedVisits={selectedVisits}
+                  selectedCartAdd={selectedCartAdd}
+                  selectedOrder={selectedOrder}
+                  onVisitsChange={handleVisitsChange}
+                  onCartAddChange={setSelectedCartAdd}
+                  onOrderChange={setSelectedOrder}
+                />
+                {siteCodes.length > 0 && (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginTop: '12px',
+                    padding: '8px 14px',
+                    backgroundColor: ds.successBg,
+                    border: `1px solid ${ds.successBorder}`,
+                    borderRadius: '8px',
+                    color: ds.successText,
+                    fontSize: '13px',
+                    fontWeight: 600,
+                  }}>
+                    ✓ 발견된 Site Code: <strong>{siteCodes.length}개</strong>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ ...card, color: ds.textMuted, fontSize: '14px', textAlign: 'center', padding: '48px 24px' }}>
+                1단계에서 파일을 업로드하거나 API로 데이터를 불러오세요.
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* ── Step 3: 결과 ── */}
+        {step === 3 && (
+          <section>
+            {results.length > 0 ? (
+              <ResultTable results={results} />
+            ) : (
+              <div style={{
+                ...card,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '14px 16px',
+                backgroundColor: ds.errorBg,
+                border: `1px solid ${ds.errorBorder}`,
+                color: ds.errorText,
+                fontSize: '14px',
+              }}>
+                <span>⚠️</span>결과가 없습니다. 뒤로 가서 다시 계산해주세요.
+              </div>
+            )}
+          </section>
+        )}
+      </main>
     </div>
   );
 }

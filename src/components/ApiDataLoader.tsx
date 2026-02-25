@@ -57,7 +57,6 @@ export const ApiDataLoader: React.FC<ApiDataLoaderProps> = ({ onDataLoaded, onEr
       .then((opts) => {
         if (cancelled) return;
         setOptions(opts);
-        if (opts.사업부?.length && !사업부) set사업부(opts.사업부[0]);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -72,11 +71,11 @@ export const ApiDataLoader: React.FC<ApiDataLoaderProps> = ({ onDataLoaded, onEr
   }, []);
 
   useEffect(() => {
-    if (!pageTypesFor부.includes(페이지타입)) set페이지타입(pageTypesFor부[0] ?? '');
+    if (페이지타입 && !pageTypesFor부.includes(페이지타입)) set페이지타입('');
   }, [사업부, pageTypesFor부]);
 
   useEffect(() => {
-    if (!detailTypesFor부AndPage.includes(상세타입)) set상세타입(detailTypesFor부AndPage[0] ?? '');
+    if (상세타입 && !detailTypesFor부AndPage.includes(상세타입)) set상세타입('');
   }, [페이지타입, detailTypesFor부AndPage]);
 
   const handleLoad = async () => {
@@ -112,103 +111,107 @@ export const ApiDataLoader: React.FC<ApiDataLoaderProps> = ({ onDataLoaded, onEr
 
   const canLoad = options && 사업부 && 페이지타입 && 상세타입 && startDate && endDate && !loadingData;
 
-  const labelStyle = { display: 'block' as const, marginBottom: '4px', fontWeight: 'bold' as const, fontSize: '13px' };
-  const inputStyle = {
-    padding: '6px 8px',
-    border: '1px solid #ccc',
-    borderRadius: '4px',
-    fontSize: '14px',
+  const labelStyle: React.CSSProperties = {
+    display: 'block',
+    marginBottom: '6px',
+    fontWeight: 600,
+    fontSize: '13px',
+    color: '#374151',
   };
-  const selectStyle = { ...inputStyle, minWidth: '100px', cursor: 'pointer' as const };
+  const fieldStyle: React.CSSProperties = {
+    padding: '9px 12px',
+    border: '1.5px solid #e5e7eb',
+    borderRadius: '8px',
+    fontSize: '14px',
+    color: '#111827',
+    backgroundColor: '#fff',
+    outline: 'none',
+    transition: 'border-color 0.15s ease',
+  };
+  const selectStyle: React.CSSProperties = { ...fieldStyle, minWidth: '130px', cursor: 'pointer' };
 
   return (
-    <div style={{ marginBottom: '20px' }}>
-      {loadingOptions && <p style={{ color: '#666', marginBottom: '8px' }}>옵션 로딩 중...</p>}
+    <div>
+      {loadingOptions && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#6b7280', fontSize: '13px', marginBottom: '12px' }}>
+          <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span>
+          옵션 로딩 중...
+        </div>
+      )}
       {apiError && (
-        <div style={{ padding: '10px', backgroundColor: '#fee', borderRadius: '4px', color: '#c33', marginBottom: '12px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '8px',
+          padding: '12px 14px',
+          backgroundColor: '#fef2f2',
+          border: '1px solid #fecaca',
+          borderRadius: '8px',
+          color: '#dc2626',
+          fontSize: '13px',
+          marginBottom: '12px',
+        }}>
+          <span style={{ flexShrink: 0 }}>⚠️</span>
           {apiError}
         </div>
       )}
 
       {options && (
-        <>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '12px 20px' }}>
-            <div>
-              <label style={labelStyle}>사업부</label>
-              <select
-                value={사업부}
-                onChange={(e) => set사업부(e.target.value)}
-                style={selectStyle}
-              >
-                <option value="">선택</option>
-                {(options.사업부 || []).map((v) => (
-                  <option key={v} value={v}>{v || '(빈 값)'}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>페이지 타입</label>
-              <select
-                value={페이지타입}
-                onChange={(e) => set페이지타입(e.target.value)}
-                style={selectStyle}
-              >
-                <option value="">선택</option>
-                {pageTypesFor부.map((v) => (
-                  <option key={v} value={v}>{v || '(빈 값)'}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>상세 타입</label>
-              <select
-                value={상세타입}
-                onChange={(e) => set상세타입(e.target.value)}
-                style={selectStyle}
-              >
-                <option value="">선택</option>
-                {detailTypesFor부AndPage.map((v) => (
-                  <option key={v} value={v}>{v || '(빈 값)'}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={labelStyle}>시작일</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>종료일</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleLoad}
-              disabled={!canLoad}
-              style={{
-                padding: '8px 18px',
-                fontSize: '14px',
-                backgroundColor: canLoad ? '#059669' : '#ccc',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: canLoad ? 'pointer' : 'not-allowed',
-                fontWeight: 'bold',
-              }}
-            >
-              {loadingData ? '불러오는 중...' : '데이터 불러오기'}
-            </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '12px 16px' }}>
+          <div>
+            <label style={labelStyle}>사업부</label>
+            <select value={사업부} onChange={(e) => set사업부(e.target.value)} style={selectStyle}>
+              <option value="">선택</option>
+              {(options.사업부 || []).map((v) => (
+                <option key={v} value={v}>{v || '(빈 값)'}</option>
+              ))}
+            </select>
           </div>
-        </>
+          <div>
+            <label style={labelStyle}>페이지 타입</label>
+            <select value={페이지타입} onChange={(e) => set페이지타입(e.target.value)} style={selectStyle}>
+              <option value="">선택</option>
+              {pageTypesFor부.map((v) => (
+                <option key={v} value={v}>{v || '(빈 값)'}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>상세 타입</label>
+            <select value={상세타입} onChange={(e) => set상세타입(e.target.value)} style={selectStyle}>
+              <option value="">선택</option>
+              {detailTypesFor부AndPage.map((v) => (
+                <option key={v} value={v}>{v || '(빈 값)'}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>시작일</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={fieldStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>종료일</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={fieldStyle} />
+          </div>
+          <button
+            type="button"
+            onClick={handleLoad}
+            disabled={!canLoad}
+            style={{
+              padding: '9px 20px',
+              fontSize: '14px',
+              fontWeight: 600,
+              backgroundColor: canLoad ? '#2563eb' : '#93c5fd',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: canLoad ? 'pointer' : 'not-allowed',
+              transition: 'background 0.15s ease',
+            }}
+          >
+            {loadingData ? '불러오는 중...' : '데이터 불러오기'}
+          </button>
+        </div>
       )}
     </div>
   );
