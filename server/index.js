@@ -23,7 +23,8 @@ try {
 const app = express();
 app.use(express.json());
 
-const PORT = Number(process.env.SERVER_PORT) || 5000;
+// Render는 PORT를 주입. 로컬은 SERVER_PORT 또는 5000
+const PORT = Number(process.env.PORT || process.env.SERVER_PORT) || 5000;
 
 // .env 로드 여부 확인 (값 노출 없이)
 if (!process.env.AA_GLOBAL_COMPANY_ID || !process.env.AA_RSID) {
@@ -101,6 +102,15 @@ app.post('/api/v1-data', async (req, res) => {
     return res.status(500).json({ error: e.message || '서버 오류' });
   }
 });
+
+// 프로덕션: Vite 빌드 결과(dist) 서빙 + SPA 폴백 (API 라우트 뒤에 둠)
+if (process.env.NODE_ENV === 'production') {
+  const distPath = path.join(__dirname, '..', 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`API 서버 실행: http://localhost:${PORT}`);
