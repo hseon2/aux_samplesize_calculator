@@ -3,6 +3,8 @@ import { SegmentLabel } from '../utils/parser';
 
 interface SegmentSelectorProps {
   labels: SegmentLabel[];
+  title?: string;
+  actions?: React.ReactNode;
   selectedVisits: string;
   selectedCartAdd: string;
   selectedOrder: string;
@@ -13,6 +15,8 @@ interface SegmentSelectorProps {
 
 export const SegmentSelector: React.FC<SegmentSelectorProps> = ({
   labels,
+  title,
+  actions,
   selectedVisits,
   selectedCartAdd,
   selectedOrder,
@@ -32,7 +36,10 @@ export const SegmentSelector: React.FC<SegmentSelectorProps> = ({
       borderRadius: '8px',
       backgroundColor: '#f9f9f9'
     }}>
-      <h3>세그먼트 라벨 선택</h3>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '12px' }}>
+        <h3 style={{ margin: 0 }}>{title ?? '세그먼트 라벨 선택'}</h3>
+        {actions}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
         <div>
           <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>

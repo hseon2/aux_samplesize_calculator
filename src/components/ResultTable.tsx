@@ -13,9 +13,11 @@ type SortDir = 'asc' | 'desc';
 
 interface ResultTableProps {
   results: TestDurationResult[];
+  showCartMetrics?: boolean;
+  showOrderMetrics?: boolean;
 }
 
-export const ResultTable: React.FC<ResultTableProps> = ({ results }) => {
+export const ResultTable: React.FC<ResultTableProps> = ({ results, showCartMetrics = true, showOrderMetrics = true }) => {
   const [sortKey, setSortKey] = useState<SortKey | null>('minDaysForOrder');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
@@ -56,9 +58,16 @@ export const ResultTable: React.FC<ResultTableProps> = ({ results }) => {
     return String(value);
   };
 
+  const formatDaily = (value: number): string => {
+    // Daily Visits/Cart/Order: 소수점 첫째자리에서 반올림(= 정수)
+    return Math.round(value).toLocaleString();
+  };
+
   const formatPercent = (value: number): string => {
     return (value * 100).toFixed(2) + '%';
   };
+
+  const maybe = (enabled: boolean, v: string) => (enabled ? v : '');
 
   const sortIcon = (key: SortKey) => {
     if (sortKey !== key) return <span style={{ opacity: 0.35, marginLeft: '4px' }}>↕</span>;
@@ -190,34 +199,34 @@ export const ResultTable: React.FC<ResultTableProps> = ({ results }) => {
                   {row.siteCode}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', color: '#374151' }}>
-                  {formatNumber(row.dailyVisits)}
+                  {formatDaily(row.dailyVisits)}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', color: '#374151' }}>
-                  {formatNumber(row.dailyCart)}
+                  {formatDaily(row.dailyCart)}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', color: '#374151' }}>
-                  {formatNumber(row.dailyOrder)}
+                  {formatDaily(row.dailyOrder)}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', color: '#374151' }}>
-                  {formatPercent(row.cartCVR)}
+                  {maybe(showCartMetrics, formatPercent(row.cartCVR))}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', color: '#374151' }}>
-                  {formatPercent(row.orderCVR)}
+                  {maybe(showOrderMetrics, formatPercent(row.orderCVR))}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', backgroundColor: '#f0f9ff', color: '#0c4a6e', fontWeight: 500 }}>
-                  {formatNumber(row.cartTestDuration5Percent)}
+                  {maybe(showCartMetrics, formatNumber(row.cartTestDuration5Percent))}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', backgroundColor: '#f0f9ff', color: '#0c4a6e', fontWeight: 500 }}>
-                  {formatNumber(row.cartTestDuration10Percent)}
+                  {maybe(showCartMetrics, formatNumber(row.cartTestDuration10Percent))}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', backgroundColor: '#fff7ed', color: '#7c2d12', fontWeight: 500 }}>
-                  {formatNumber(row.orderTestDuration5Percent)}
+                  {maybe(showOrderMetrics, formatNumber(row.orderTestDuration5Percent))}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', backgroundColor: '#fff7ed', color: '#7c2d12', fontWeight: 500 }}>
-                  {formatNumber(row.orderTestDuration10Percent)}
+                  {maybe(showOrderMetrics, formatNumber(row.orderTestDuration10Percent))}
                 </td>
                 <td style={{ ...tdBase, textAlign: 'right', fontWeight: 600, color: '#111827' }}>
-                  {formatNumber(row.minDaysForCart)}
+                  {maybe(showCartMetrics, formatNumber(row.minDaysForCart))}
                 </td>
                 <td style={{
                   ...tdBase,
@@ -226,7 +235,7 @@ export const ResultTable: React.FC<ResultTableProps> = ({ results }) => {
                   color: sortKey === 'minDaysForOrder' ? '#2563eb' : '#111827',
                   backgroundColor: sortKey === 'minDaysForOrder' ? '#eff6ff' : undefined,
                 }}>
-                  {formatNumber(row.minDaysForOrder)}
+                  {maybe(showOrderMetrics, formatNumber(row.minDaysForOrder))}
                 </td>
               </tr>
             ))}

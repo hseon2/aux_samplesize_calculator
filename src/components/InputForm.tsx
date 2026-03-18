@@ -20,6 +20,30 @@ export const InputForm: React.FC<InputFormProps> = ({ params, onChange }) => {
     onChange({ ...params, [field]: value });
   };
 
+  const parseDateInput = (v: string): Date | null => {
+    if (!v) return null;
+    // input[type=date]는 YYYY-MM-DD 형태
+    const d = new Date(v + 'T00:00:00');
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const calcInclusiveDays = (start: string, end: string): number | null => {
+    const s = parseDateInput(start);
+    const e = parseDateInput(end);
+    if (!s || !e) return null;
+    const diffMs = e.getTime() - s.getTime();
+    if (diffMs < 0) return null; // 종료일이 시작일보다 빠르면 자동 계산하지 않음
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1; // 포함일수
+    return days > 0 ? days : null;
+  };
+
+  const handleDateChange = (field: 'startDate' | 'endDate', value: string) => {
+    const next = { ...params, [field]: value } as InputParams;
+    const days = calcInclusiveDays(next.startDate, next.endDate);
+    if (days) next.rangeDays = days;
+    onChange(next);
+  };
+
   // 입력 중 빈 값 허용을 위한 로컬 string 상태
   const [offersRaw, setOffersRaw] = useState(String(params.numberOfOffers));
   const [confidenceRaw, setConfidenceRaw] = useState(String(params.confidenceLevel * 100));
@@ -82,7 +106,7 @@ export const InputForm: React.FC<InputFormProps> = ({ params, onChange }) => {
           <input
             type="date"
             value={params.startDate}
-            onChange={(e) => handleChange('startDate', e.target.value)}
+            onChange={(e) => handleDateChange('startDate', e.target.value)}
             style={inputFieldStyle}
           />
         </div>
@@ -91,7 +115,7 @@ export const InputForm: React.FC<InputFormProps> = ({ params, onChange }) => {
           <input
             type="date"
             value={params.endDate}
-            onChange={(e) => handleChange('endDate', e.target.value)}
+            onChange={(e) => handleDateChange('endDate', e.target.value)}
             style={inputFieldStyle}
           />
         </div>

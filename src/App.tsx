@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import * as ExcelJS from 'exceljs';
 import { FileUpload } from './components/FileUpload';
 import { ApiDataLoader } from './components/ApiDataLoader';
 import { DataPreview } from './components/DataPreview';
@@ -18,15 +19,33 @@ import {
   TestDurationResult 
 } from './utils/calculator';
 
+const makeId = () => {
+  try {
+    // 일부 환경에서 crypto.randomUUID가 없을 수 있어 fallback 제공
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyCrypto: any = (globalThis as any).crypto;
+    if (anyCrypto?.randomUUID) return anyCrypto.randomUUID();
+  } catch { /* ignore */ }
+  return `tp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
 function App() {
   const [rawData, setRawData] = useState<RawDataRow[]>([]);
   const [segmentLabels, setSegmentLabels] = useState<ReturnType<typeof extractSegmentLabels>>([]);
-  const [selectedVisits, setSelectedVisits] = useState<string>('');
-  const [selectedCartAdd, setSelectedCartAdd] = useState<string>('');
-  const [selectedOrder, setSelectedOrder] = useState<string>('');
-  const [siteCodes, setSiteCodes] = useState<string[]>([]);
   const [, setParsedData] = useState<ReturnType<typeof parseData>>([]);
-  const [results, setResults] = useState<TestDurationResult[]>([]);
+  type TargetPageSet = {
+    id: string;
+    visitsLabel: string;
+    cartAddLabel: string;
+    orderLabel: string;
+    siteCodes: string[];
+    results: TestDurationResult[];
+  };
+  const [initialTargetPageId] = useState(() => makeId());
+  const [targetPages, setTargetPages] = useState<TargetPageSet[]>(() => ([
+    { id: initialTargetPageId, visitsLabel: '', cartAddLabel: '', orderLabel: '', siteCodes: [], results: [] },
+  ]));
+  const [activeTargetPageId, setActiveTargetPageId] = useState<string>(() => initialTargetPageId);
   const [error, setError] = useState<string>('');
   const [view, setView] = useState<'setup' | 'result'>('setup');
   const [dataSource, setDataSource] = useState<'file' | 'api'>('file');
@@ -58,30 +77,36 @@ function App() {
       }));
     }
     
-    const visitsLabel = labels.find(l => l.type === 'visits');
-    const cartAddLabel = labels.find(l => l.type === 'cartAdd');
-    const orderLabel = labels.find(l => l.type === 'order');
-    
-    if (visitsLabel) {
-      setSelectedVisits(visitsLabel.label);
-      const codes = extractSiteCodes(data, visitsLabel.label);
-      setSiteCodes(codes);
-    }
-    if (cartAddLabel) setSelectedCartAdd(cartAddLabel.label);
-    if (orderLabel) setSelectedOrder(orderLabel.label);
+    const visitsLabel = labels.find(l => l.type === 'visits')?.label ?? '';
+    const cartAddLabel = labels.find(l => l.type === 'cartAdd')?.label ?? '';
+    const orderLabel = labels.find(l => l.type === 'order')?.label ?? '';
+    const codes = visitsLabel ? extractSiteCodes(data, visitsLabel) : [];
+
+    const first: TargetPageSet = {
+      id: makeId(),
+      visitsLabel,
+      cartAddLabel,
+      orderLabel,
+      siteCodes: codes,
+      results: [],
+    };
+    setTargetPages([first]);
+    setActiveTargetPageId(first.id);
   };
 
-  const handleVisitsChange = (label: string) => {
-    setSelectedVisits(label);
-    if (label && rawData.length > 0) {
-      const codes = extractSiteCodes(rawData, label);
-      setSiteCodes(codes);
-    }
+  const updateTargetPage = (id: string, patch: Partial<TargetPageSet>) => {
+    setTargetPages(prev => prev.map(tp => tp.id === id ? { ...tp, ...patch } : tp));
+  };
+
+  const handleVisitsChange = (id: string, label: string) => {
+    const codes = label && rawData.length > 0 ? extractSiteCodes(rawData, label) : [];
+    updateTargetPage(id, { visitsLabel: label, siteCodes: codes });
   };
 
   const handleCalculate = () => {
-    if (!selectedVisits || !selectedCartAdd || !selectedOrder) {
-      setError('모든 세그먼트 라벨을 선택해주세요.');
+    const invalid = targetPages.find(tp => !tp.visitsLabel || (!tp.cartAddLabel && !tp.orderLabel));
+    if (invalid) {
+      setError('각 Target Page에서 Visits는 필수이며, Cart 또는 Order 중 최소 1개는 선택해주세요.');
       return;
     }
 
@@ -92,22 +117,13 @@ function App() {
       return;
     }
 
-    if (siteCodes.length === 0) {
-      setError('Site Code를 찾을 수 없습니다.');
+    const noCodes = targetPages.find(tp => tp.siteCodes.length === 0);
+    if (noCodes) {
+      setError('Site Code를 찾을 수 없습니다. Visits 라벨 선택을 확인해주세요.');
       return;
     }
 
     try {
-      // 데이터 파싱
-      const parsed = parseData(
-        rawData,
-        selectedVisits,
-        selectedCartAdd,
-        selectedOrder,
-        siteCodes
-      );
-      setParsedData(parsed);
-
       // 계산 수행
       const calcParams: CalculationParams = {
         rangeDays: hasRangeDays ? inputParams.rangeDays : undefined,
@@ -118,14 +134,22 @@ function App() {
         statisticalPower: inputParams.statisticalPower
       };
 
-      const calculatedResults = calculateAll(parsed, calcParams);
-      if (calculatedResults.length === 0) {
+      const nextPages = targetPages.map(tp => {
+        const parsed = parseData(rawData, tp.visitsLabel, tp.cartAddLabel, tp.orderLabel, tp.siteCodes);
+        setParsedData(parsed);
+        const calculated = calculateAll(parsed, calcParams);
+        const sorted = [...calculated].sort((a, b) => b.dailyVisits - a.dailyVisits);
+        return { ...tp, results: sorted };
+      });
+
+      if (nextPages.some(tp => tp.results.length === 0)) {
         setError('Data range(일수) 또는 날짜 입력이 올바르지 않아 계산할 수 없습니다.');
         return;
       }
-      // Daily Visits 내림차순(많은 순) 정렬
-      const sorted = [...calculatedResults].sort((a, b) => b.dailyVisits - a.dailyVisits);
-      setResults(sorted);
+
+      setTargetPages(nextPages);
+      setActiveTargetPageId(nextPages[0]?.id ?? activeTargetPageId);
+
       setError('');
       setView('result');
     } catch (err) {
@@ -133,12 +157,107 @@ function App() {
     }
   };
 
-  const canCalculate =
-    selectedVisits &&
-    selectedCartAdd &&
-    selectedOrder &&
-    (inputParams.rangeDays > 0 || (inputParams.startDate && inputParams.endDate)) &&
-    siteCodes.length > 0;
+  const safeSheetName = (name: string, fallback: string) => {
+    const raw = (name || fallback).trim() || fallback;
+    // Excel 시트명 제한: 31자, 금지문자: \ / ? * [ ]
+    const cleaned = raw.replace(/[\\\/\?\*\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+    return cleaned.length > 31 ? cleaned.slice(0, 31) : cleaned;
+  };
+
+  const downloadResultsExcel = async () => {
+    try {
+      if (targetPages.every(tp => tp.results.length === 0)) return;
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'AB Test Sample Size Calculator';
+      wb.created = new Date();
+
+      const addSheet = (sheetTitle: string, rows: TestDurationResult[]) => {
+        const ws = wb.addWorksheet(sheetTitle);
+        ws.columns = [
+          { header: 'Site Code', key: 'siteCode', width: 16 },
+          { header: 'Daily Visits', key: 'dailyVisits', width: 14 },
+          { header: 'Daily Cart', key: 'dailyCart', width: 14 },
+          { header: 'Daily Order', key: 'dailyOrder', width: 14 },
+          { header: 'Cart CVR', key: 'cartCVR', width: 12 },
+          { header: 'Order CVR', key: 'orderCVR', width: 12 },
+          { header: 'Cart 5% Uplift Days', key: 'cart5', width: 18 },
+          { header: 'Cart 10% Uplift Days', key: 'cart10', width: 19 },
+          { header: 'Order 5% Uplift Days', key: 'order5', width: 19 },
+          { header: 'Order 10% Uplift Days', key: 'order10', width: 20 },
+          { header: 'Min Days (Cart)', key: 'minCart', width: 16 },
+          { header: 'Min Days (Order)', key: 'minOrder', width: 16 },
+        ];
+
+        rows.forEach((r) => {
+          ws.addRow({
+            siteCode: r.siteCode,
+            dailyVisits: r.dailyVisits,
+            dailyCart: r.dailyCart,
+            dailyOrder: r.dailyOrder,
+            cartCVR: r.cartCVR,
+            orderCVR: r.orderCVR,
+            cart5: r.cartTestDuration5Percent,
+            cart10: r.cartTestDuration10Percent,
+            order5: r.orderTestDuration5Percent,
+            order10: r.orderTestDuration10Percent,
+            minCart: r.minDaysForCart,
+            minOrder: r.minDaysForOrder,
+          });
+        });
+
+        // header 스타일
+        ws.getRow(1).font = { bold: true };
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+        // CVR 퍼센트 포맷
+        ws.getColumn('cartCVR').numFmt = '0.00%';
+        ws.getColumn('orderCVR').numFmt = '0.00%';
+      };
+
+      targetPages.forEach((tp, idx) => {
+        if (tp.results.length === 0) return;
+        const fallback = `Target Page ${idx + 1}`;
+        // Cart/Order 선택 여부에 따라 엑셀에서도 미선택 컬럼은 공란으로
+        const showCart = Boolean(tp.cartAddLabel);
+        const showOrder = Boolean(tp.orderLabel);
+        const adjusted = tp.results.map((r) => ({
+          ...r,
+          cartCVR: showCart ? r.cartCVR : 0,
+          orderCVR: showOrder ? r.orderCVR : 0,
+          cartTestDuration5Percent: showCart ? r.cartTestDuration5Percent : '',
+          cartTestDuration10Percent: showCart ? r.cartTestDuration10Percent : '',
+          orderTestDuration5Percent: showOrder ? r.orderTestDuration5Percent : '',
+          orderTestDuration10Percent: showOrder ? r.orderTestDuration10Percent : '',
+          minDaysForCart: showCart ? r.minDaysForCart : '',
+          minDaysForOrder: showOrder ? r.minDaysForOrder : '',
+        }));
+        addSheet(safeSheetName(tp.visitsLabel || fallback, fallback), adjusted);
+      });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ab-test-results.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Excel 다운로드 중 오류가 발생했습니다.');
+    }
+  };
+
+  const canCalculate = useMemo(() => {
+    const hasDays = inputParams.rangeDays > 0 || Boolean(inputParams.startDate && inputParams.endDate);
+    const okLabels = targetPages.every(tp => tp.visitsLabel && (tp.cartAddLabel || tp.orderLabel));
+    const okCodes = targetPages.every(tp => tp.siteCodes.length > 0);
+    return Boolean(hasDays && okLabels && okCodes);
+  }, [inputParams.rangeDays, inputParams.startDate, inputParams.endDate, targetPages]);
 
   // 단계: 1=데이터 입력, 2=설정 및 계산, 3=결과
   const step = view === 'result' ? 3 : rawData.length > 0 ? 2 : 1;
@@ -267,6 +386,9 @@ function App() {
           gap: '16px',
           padding: '16px 24px',
           marginBottom: '24px',
+          position: 'sticky',
+          top: '12px',
+          zIndex: 50,
         }}>
           {/* 스텝 인디케이터 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -352,7 +474,36 @@ function App() {
                   </button>
                 ))}
               </div>
-              {dataSource === 'file' && <FileUpload onFileParsed={handleDataLoaded} onError={setError} />}
+              {dataSource === 'file' && (
+                <div>
+                  <div style={{ marginBottom: '10px' }}>
+                    <div style={{ fontSize: '13px', color: ds.textMuted }}>
+                      Adobe Analytics 데이터가 아닌 경우, 아래 Excel 템플릿을 내려받아 사용하세요.
+                    </div>
+                    <a
+                      href="/raw-data_template.xlsx"
+                      download
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        marginTop: '10px',
+                        padding: '9px 14px',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        borderRadius: '10px',
+                        border: `1.5px solid ${ds.border}`,
+                        backgroundColor: ds.surface,
+                        color: ds.textPrimary,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      📗 Excel 템플릿 다운로드
+                    </a>
+                  </div>
+                  <FileUpload onFileParsed={handleDataLoaded} onError={setError} />
+                </div>
+              )}
               {dataSource === 'api' && <ApiDataLoader onDataLoaded={handleDataLoaded} onError={setError} />}
             </div>
           </section>
@@ -380,16 +531,69 @@ function App() {
                 </div>
                 <InputForm params={inputParams} onChange={setInputParams} />
                 <DataPreview data={rawData} />
-                <SegmentSelector
-                  labels={segmentLabels}
-                  selectedVisits={selectedVisits}
-                  selectedCartAdd={selectedCartAdd}
-                  selectedOrder={selectedOrder}
-                  onVisitsChange={handleVisitsChange}
-                  onCartAddChange={setSelectedCartAdd}
-                  onOrderChange={setSelectedOrder}
-                />
-                {siteCodes.length > 0 && (
+                {targetPages.map((tp, idx) => (
+                  <SegmentSelector
+                    key={tp.id}
+                    labels={segmentLabels}
+                    title={`Target Page ${idx + 1}`}
+                    actions={idx === 0 ? undefined : (
+                      <button
+                        onClick={() => {
+                          setTargetPages(prev => prev.filter(p => p.id !== tp.id));
+                          setActiveTargetPageId((prevActive) => prevActive === tp.id ? (targetPages[0]?.id ?? prevActive) : prevActive);
+                        }}
+                        style={{
+                          padding: '6px 10px',
+                          fontSize: '12px',
+                          fontWeight: 800,
+                          backgroundColor: '#fee2e2',
+                          color: '#991b1b',
+                          border: '1px solid #fecaca',
+                          borderRadius: '999px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        제거
+                      </button>
+                    )}
+                    selectedVisits={tp.visitsLabel}
+                    selectedCartAdd={tp.cartAddLabel}
+                    selectedOrder={tp.orderLabel}
+                    onVisitsChange={(label) => handleVisitsChange(tp.id, label)}
+                    onCartAddChange={(label) => updateTargetPage(tp.id, { cartAddLabel: label })}
+                    onOrderChange={(label) => updateTargetPage(tp.id, { orderLabel: label })}
+                  />
+                ))}
+
+                <div style={{ marginTop: '4px', marginBottom: '12px' }}>
+                  <button
+                    onClick={() => {
+      const next: TargetPageSet = {
+                        id: makeId(),
+                        visitsLabel: '',
+                        cartAddLabel: '',
+                        orderLabel: '',
+                        siteCodes: [],
+                        results: [],
+                      };
+                      setTargetPages(prev => [...prev, next]);
+                    }}
+                    style={{
+                      padding: '10px 14px',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      backgroundColor: '#111827',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    + 타겟 페이지 추가
+                  </button>
+                </div>
+
+                {targetPages.some(tp => tp.siteCodes.length > 0) && (
                   <div style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -403,7 +607,10 @@ function App() {
                     fontSize: '13px',
                     fontWeight: 600,
                   }}>
-                    ✓ 발견된 Site Code: <strong>{siteCodes.length}개</strong>
+                    ✓ 발견된 Site Code:{' '}
+                    <strong>
+                      {targetPages.map((tp, idx) => `Target Page ${idx + 1} ${tp.siteCodes.length}개`).join(' · ')}
+                    </strong>
                   </div>
                 )}
               </>
@@ -418,8 +625,76 @@ function App() {
         {/* ── Step 3: 결과 ── */}
         {step === 3 && (
           <section>
-            {results.length > 0 ? (
-              <ResultTable results={results} />
+            {targetPages.some(tp => tp.results.length > 0) ? (
+              <>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: '12px' }}>
+                  <div style={{ color: ds.textMuted, fontSize: '13px' }}>
+                    결과를 Excel로 내려받을 수 있습니다. (Target Page가 여러 개면 시트로 분리)
+                  </div>
+                  <button
+                    onClick={downloadResultsExcel}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '9px 14px',
+                      fontSize: '13px',
+                      fontWeight: 800,
+                      borderRadius: '10px',
+                      border: `1.5px solid ${ds.border}`,
+                      backgroundColor: ds.surface,
+                      color: ds.textPrimary,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📗 Excel 다운로드
+                  </button>
+                </div>
+                {targetPages.length > 1 && (
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                    {targetPages.map((tp, idx) => {
+                      const isActive = activeTargetPageId === tp.id;
+                      const label = tp.visitsLabel || `Target Page ${idx + 1}`;
+                      return (
+                        <button
+                          key={tp.id}
+                          onClick={() => setActiveTargetPageId(tp.id)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '999px',
+                            border: `1.5px solid ${isActive ? ds.primary : ds.border}`,
+                            backgroundColor: isActive ? ds.infoBg : ds.surface,
+                            color: isActive ? ds.primary : ds.textMuted,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            fontSize: '13px',
+                            maxWidth: '520px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={label}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {(() => {
+                  const active = targetPages.find(tp => tp.id === activeTargetPageId) ?? targetPages[0];
+                  const showCart = Boolean(active?.cartAddLabel);
+                  const showOrder = Boolean(active?.orderLabel);
+                  return (
+                    <ResultTable
+                      results={active?.results ?? []}
+                      showCartMetrics={showCart}
+                      showOrderMetrics={showOrder}
+                    />
+                  );
+                })()}
+              </>
             ) : (
               <div style={{
                 ...card,
