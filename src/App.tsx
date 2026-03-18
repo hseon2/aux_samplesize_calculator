@@ -242,7 +242,7 @@ function App() {
           alignItems: 'center',
           gap: '12px',
         }}>
-          <span style={{ fontSize: '18px' }}>🧪</span>
+          <span style={{ fontSize: '18px' }}>📊</span>
           <span style={{
             fontSize: '16px',
             fontWeight: 700,
