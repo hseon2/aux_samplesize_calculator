@@ -6,6 +6,7 @@ import { DataPreview } from './components/DataPreview';
 import { InputForm, InputParams } from './components/InputForm';
 import { SegmentSelector } from './components/SegmentSelector';
 import { ResultTable } from './components/ResultTable';
+import { MilestoneCalculator } from './components/MilestoneCalculator';
 import { 
   RawDataRow, 
   extractSegmentLabels, 
@@ -49,6 +50,7 @@ function App() {
   const [error, setError] = useState<string>('');
   const [view, setView] = useState<'setup' | 'result'>('setup');
   const [dataSource, setDataSource] = useState<'file' | 'api'>('file');
+  const [activeTool, setActiveTool] = useState<'sample-size' | 'milestone'>('sample-size');
 
   const [inputParams, setInputParams] = useState<InputParams>({
     rangeDays: 30,
@@ -335,6 +337,21 @@ function App() {
     </button>
   );
 
+  const toolTabStyle = (tool: 'sample-size' | 'milestone'): React.CSSProperties => {
+    const isActive = activeTool === tool;
+    return {
+      padding: '8px 14px',
+      borderRadius: '999px',
+      border: `1px solid ${isActive ? '#93c5fd' : '#4b5563'}`,
+      backgroundColor: isActive ? '#1d4ed8' : 'transparent',
+      color: '#f9fafb',
+      fontSize: '13px',
+      fontWeight: 700,
+      cursor: 'pointer',
+      transition: 'all 0.15s ease',
+    };
+  };
+
   const card: React.CSSProperties = {
     backgroundColor: ds.surface,
     borderRadius: ds.cardRadius,
@@ -370,12 +387,27 @@ function App() {
           }}>
             AB Test Sample Size Calculator
           </span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => setActiveTool('sample-size')}
+              style={toolTabStyle('sample-size')}
+            >
+              Sample Size
+            </button>
+            <button
+              onClick={() => setActiveTool('milestone')}
+              style={toolTabStyle('milestone')}
+            >
+              Milestone
+            </button>
+          </div>
         </div>
       </header>
 
       {/* ── 메인 콘텐츠 ── */}
       <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px' }}>
-
+        {activeTool === 'sample-size' ? (
+          <>
         {/* ── 스텝 바 + CTA ── */}
         <div style={{
           ...card,
@@ -711,6 +743,10 @@ function App() {
               </div>
             )}
           </section>
+        )}
+          </>
+        ) : (
+          <MilestoneCalculator />
         )}
       </main>
     </div>
