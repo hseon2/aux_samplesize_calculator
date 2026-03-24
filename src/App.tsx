@@ -378,14 +378,14 @@ function App() {
           alignItems: 'center',
           gap: '12px',
         }}>
-          <span style={{ fontSize: '18px' }}>📊</span>
+          <span style={{ fontSize: '18px' }}>{activeTool === 'milestone' ? '🗓️' : '📊'}</span>
           <span style={{
             fontSize: '16px',
             fontWeight: 700,
             color: '#f9fafb',
             letterSpacing: '-0.02em',
           }}>
-            AB Test Sample Size Calculator
+            {activeTool === 'milestone' ? 'AUX Milestone Calculator' : 'AUX AB Test Sample Size Calculator'}
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
             <button
