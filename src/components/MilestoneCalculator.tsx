@@ -102,6 +102,24 @@ export const MilestoneCalculator: React.FC = () => {
 
   const prevHasTargetRef = useRef<boolean>(false);
 
+  const handleResetInputs = () => {
+    setLiveDate('');
+    setDevDays(10);
+    setTargetCountriesInput('');
+    setOneCountryWorkDays(10);
+    setExtraCountrySpreadDays(0);
+    setQaDurationDaysInput('');
+    setReviewOpinion('');
+    setScenarioTestNeed('');
+    setDevelopmentNeed('');
+    setAnalysisNeed('');
+    setCartSampleDays('');
+    setOrderSampleDays('');
+    setCopyMessage('');
+    setLeftAccOpen('schedule');
+    prevHasTargetRef.current = false;
+  };
+
   const parsedLiveDate = useMemo(() => {
     if (!liveDate) return null;
     const date = new Date(liveDate);
@@ -138,8 +156,10 @@ export const MilestoneCalculator: React.FC = () => {
     // 기존 입력 방식(개발 소요 기간)을 유지하되,
     // 대상 국가 수가 1개 이상이면 "총 개발 소요 기간"을 자동 계산한다.
     if (!hasTargetCountries) return devDays;
-    if (!Number.isFinite(oneCountryWorkDays) || !Number.isFinite(extraCountrySpreadDays)) return null;
-    return oneCountryWorkDays + extraCountrySpreadDays * (targetCountries - 1);
+    if (!Number.isFinite(oneCountryWorkDays)) return null;
+    // 입력 중 빈 칸은 NaN으로 두고, 계산 시에만 0으로 간주 (Number('')→0 방지)
+    const spread = Number.isNaN(extraCountrySpreadDays) ? 0 : extraCountrySpreadDays;
+    return oneCountryWorkDays + spread * (targetCountries - 1);
   }, [hasTargetCountries, devDays, oneCountryWorkDays, extraCountrySpreadDays, targetCountries]);
 
   const frdAssetDueDate = useMemo(() => {
@@ -170,10 +190,11 @@ export const MilestoneCalculator: React.FC = () => {
     const trafficText = '(Traffic 입력 필요)';
     const kpiText = '(KPI 입력 필요)';
 
-    const atcSampleDays = cartSampleDays.trim() || '20';
-
-    // 테스트 일정은 "QA 링크 전달 ~ Live" 범위로 표시
-    const testScheduleText = displayQaDate !== '-' && displayLiveDate !== '-' ? `${displayQaDate} ~ ${displayLiveDate}` : '-';
+    const reviewCriteriaText = reviewOpinion.trim() || '-';
+    const cartTrim = cartSampleDays.trim();
+    const orderTrim = orderSampleDays.trim();
+    const cartSampleDisplay = cartTrim || '-';
+    const orderSampleDisplay = orderTrim || '-';
 
     return [
       '[ 시나리오 ]',
@@ -182,11 +203,13 @@ export const MilestoneCalculator: React.FC = () => {
       `- Traffic : ${trafficText}`,
       `- KPI : ${kpiText}`,
       '',
-      `- 테스트 일정 : ${testScheduleText}`,
+      '[ 테스트 일정 ]',
       `- Live 일자 : ${displayLiveDate}`,
-      `- 모수 확보 (ATC CVR 기준) : ${atcSampleDays} 일`,
+      `- Cart 기준 모수 확보: ${cartSampleDisplay}`,
+      `- Order 기준 모수 확보: ${orderSampleDisplay}`,
       '',
       '[ 개발 기간 및 주요 일정 ]',
+      `- 개발 검토 기준: ${reviewCriteriaText}`,
       `- 개발 소요 기간: ${displayDevDays}`,
       `- FRD/Asset 수급 일자: ${displayFrdDate}`,
       `- QA 링크 전달 일자: ${displayQaDate}`,
@@ -204,8 +227,9 @@ export const MilestoneCalculator: React.FC = () => {
     developmentNeed,
     analysisNeed,
     cartSampleDays,
+    orderSampleDays,
+    reviewOpinion,
     displayDevDays,
-    effectiveQaDurationDays,
     displayFrdDate,
     displayQaDate,
     displayLiveDate,
@@ -281,7 +305,57 @@ export const MilestoneCalculator: React.FC = () => {
                 overflowX: 'hidden',
               }}
             >
-              <h3 style={{ margin: 0, fontSize: '15px', color: '#111827' }}>입력값</h3>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <h3 style={{ margin: 0, fontSize: '15px', color: '#111827' }}>입력값</h3>
+                <button
+                  type="button"
+                  onClick={handleResetInputs}
+                  aria-label="입력값 새로고침"
+                  title="입력값 초기화"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    flexShrink: 0,
+                    padding: '4px 10px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    backgroundColor: '#ffffff',
+                    color: '#374151',
+                    cursor: 'pointer',
+                    lineHeight: 1.2,
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden
+                  >
+                    <path
+                      d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M21 3v5h-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path
+                      d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M3 21v-5h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  새로고침
+                </button>
+              </div>
               <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {/* 일정·개발 */}
                 <div
@@ -387,6 +461,7 @@ export const MilestoneCalculator: React.FC = () => {
                           style={{
                             width: '100%',
                             height: '32px',
+                            boxSizing: 'border-box',
                             borderRadius: '8px',
                             border: '1px solid #d1d5db',
                             padding: '0 10px',
@@ -408,10 +483,21 @@ export const MilestoneCalculator: React.FC = () => {
                           min={0}
                           step={1}
                           value={Number.isNaN(extraCountrySpreadDays) ? '' : extraCountrySpreadDays}
-                          onChange={(e) => setExtraCountrySpreadDays(Number(e.target.value))}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (raw === '') {
+                              setExtraCountrySpreadDays(NaN);
+                              return;
+                            }
+                            const n = Number(raw);
+                            if (!Number.isNaN(n)) {
+                              setExtraCountrySpreadDays(n);
+                            }
+                          }}
                           style={{
                             width: '100%',
                             height: '32px',
+                            boxSizing: 'border-box',
                             borderRadius: '8px',
                             border: '1px solid #d1d5db',
                             padding: '0 10px',
@@ -431,10 +517,11 @@ export const MilestoneCalculator: React.FC = () => {
                           id="total-dev-days"
                           style={{
                             width: '100%',
-                            minHeight: '32px',
+                            height: '32px',
+                            boxSizing: 'border-box',
                             borderRadius: '8px',
                             border: '1px solid #d1d5db',
-                            padding: '8px 10px',
+                            padding: '0 10px',
                             fontSize: '13px',
                             fontWeight: 800,
                             backgroundColor: '#f8fafc',
@@ -446,7 +533,8 @@ export const MilestoneCalculator: React.FC = () => {
                           {displayDevDays}
                         </div>
                         <p style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#6b7280', lineHeight: 1.4 }}>
-                          자동 계산: {oneCountryWorkDays} + {extraCountrySpreadDays} x ({targetCountries} - 1)
+                          자동 계산: {oneCountryWorkDays} +{' '}
+                          {Number.isNaN(extraCountrySpreadDays) ? 0 : extraCountrySpreadDays} x ({targetCountries} - 1)
                         </p>
                       </div>
                     </div>
@@ -541,7 +629,7 @@ export const MilestoneCalculator: React.FC = () => {
                     htmlFor="cart-sample-days"
                     style={{ display: 'block', marginBottom: '6px', fontSize: '12px', fontWeight: 600, color: '#374151' }}
                   >
-                    Cart 모수 확보
+                    Cart 기준 모수 확보
                   </label>
                   <input
                     id="cart-sample-days"
@@ -564,7 +652,7 @@ export const MilestoneCalculator: React.FC = () => {
                     htmlFor="order-sample-days"
                     style={{ display: 'block', marginBottom: '6px', fontSize: '12px', fontWeight: 600, color: '#374151' }}
                   >
-                    Order 모수 확보
+                    Order 기준 모수 확보
                   </label>
                   <input
                     id="order-sample-days"
@@ -727,6 +815,11 @@ export const MilestoneCalculator: React.FC = () => {
             <div style={{ marginBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
                 <h3 style={{ margin: 0, fontSize: '15px', color: '#111827' }}>일정 자동 계산</h3>
+                {!parsedLiveDate && (
+                  <span style={{ fontSize: '12px', fontWeight: 400, color: '#dc2626', lineHeight: 1.4 }}>
+                    Live Date를 선택하면 일정이 자동 계산됩니다.
+                  </span>
+                )}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr auto 1fr', alignItems: 'stretch', gap: '14px' }}>
                 {milestoneSteps.map((step, index) => (
@@ -787,30 +880,79 @@ export const MilestoneCalculator: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px', flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0, fontSize: '15px', color: '#111827' }}>메일 전송용 템플릿</h3>
-            <button
-              onClick={handleCopyTemplate}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: '8px',
+              marginBottom: '10px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <h3
               style={{
-                padding: '8px 12px',
-                fontSize: '13px',
-                fontWeight: 700,
-                borderRadius: '8px',
-                border: '1px solid #d1d5db',
-                backgroundColor: '#111827',
-                color: '#ffffff',
-                cursor: 'pointer',
+                margin: 0,
+                padding: 0,
+                fontSize: '15px',
+                fontWeight: 600,
+                lineHeight: '22px',
+                color: '#111827',
+                display: 'inline-flex',
+                alignItems: 'center',
               }}
             >
-              템플릿 복사
+              메일 발송용 템플릿
+            </h3>
+            <button
+              type="button"
+              onClick={handleCopyTemplate}
+              aria-label="템플릿 복사"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '4px',
+                boxSizing: 'border-box',
+                height: '22px',
+                padding: '0 8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: '1px solid #d1d5db',
+                backgroundColor: '#ffffff',
+                color: '#374151',
+                cursor: 'pointer',
+                lineHeight: 1,
+                flexShrink: 0,
+                marginTop: '4px',
+              }}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="2" />
+                <path
+                  d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              복사
             </button>
           </div>
-          <textarea
-            value={mailTemplate}
-            readOnly
+          <div
+            role="region"
+            aria-label="메일 발송용 템플릿 미리보기"
             style={{
               width: '100%',
-              // 화면 전체를 채우지 않도록 고정 높이로 제한
               height: '452px',
               minHeight: '300px',
               borderRadius: '8px',
@@ -822,9 +964,21 @@ export const MilestoneCalculator: React.FC = () => {
               backgroundColor: '#f8fafc',
               color: '#111827',
               overflowY: 'auto',
-              resize: 'none',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              userSelect: 'text',
             }}
-          />
+          >
+            {mailTemplate.split('\n').map((line, i) => {
+              const isBracketTitle = /^\[[^\]]+\]$/.test(line.trim());
+              return (
+                <span key={i}>
+                  {i > 0 ? '\n' : null}
+                  {isBracketTitle ? <strong style={{ fontWeight: 700, color: '#111827' }}>{line}</strong> : line}
+                </span>
+              );
+            })}
+          </div>
           {copyMessage && (
             <p style={{ marginTop: '8px', marginBottom: 0, fontSize: '12px', color: '#1d4ed8' }}>
               {copyMessage}
