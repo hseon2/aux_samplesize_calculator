@@ -94,10 +94,12 @@ export const MilestoneCalculator: React.FC = () => {
   const [cartSampleDays, setCartSampleDays] = useState<string>('');
   const [orderSampleDays, setOrderSampleDays] = useState<string>('');
   const [copyMessage, setCopyMessage] = useState<string>('');
-  /** 왼쪽 입력 카드 아코디언 (한 번에 하나 펼침, 같은 헤더 재클릭 시 접힘) */
-  const [leftAccOpen, setLeftAccOpen] = useState<'schedule' | 'extra' | null>('schedule');
+  /** 왼쪽 입력: 일정·개발 / 추가 확인 각각 독립적으로 펼침·접힘 */
+  const [scheduleAccOpen, setScheduleAccOpen] = useState(true);
+  const [extraAccOpen, setExtraAccOpen] = useState(false);
   const toggleLeftAcc = (k: 'schedule' | 'extra') => {
-    setLeftAccOpen((prev) => (prev === k ? null : k));
+    if (k === 'schedule') setScheduleAccOpen((o) => !o);
+    else setExtraAccOpen((o) => !o);
   };
 
   const prevHasTargetRef = useRef<boolean>(false);
@@ -116,7 +118,8 @@ export const MilestoneCalculator: React.FC = () => {
     setCartSampleDays('');
     setOrderSampleDays('');
     setCopyMessage('');
-    setLeftAccOpen('schedule');
+    setScheduleAccOpen(true);
+    setExtraAccOpen(false);
     prevHasTargetRef.current = false;
   };
 
@@ -368,7 +371,7 @@ export const MilestoneCalculator: React.FC = () => {
                 >
                   <button
                     type="button"
-                    aria-expanded={leftAccOpen === 'schedule'}
+                    aria-expanded={scheduleAccOpen}
                     onClick={() => toggleLeftAcc('schedule')}
                     style={{
                       width: '100%',
@@ -378,7 +381,7 @@ export const MilestoneCalculator: React.FC = () => {
                       gap: '10px',
                       padding: '10px 12px',
                       border: 'none',
-                      backgroundColor: leftAccOpen === 'schedule' ? '#eff6ff' : '#f8fafc',
+                      backgroundColor: scheduleAccOpen ? '#eff6ff' : '#f8fafc',
                       cursor: 'pointer',
                       fontSize: '13px',
                       fontWeight: 800,
@@ -388,10 +391,10 @@ export const MilestoneCalculator: React.FC = () => {
                   >
                     <span>일정·개발</span>
                     <span style={{ fontSize: '11px', color: '#64748b' }} aria-hidden>
-                      {leftAccOpen === 'schedule' ? '▼' : '▶'}
+                      {scheduleAccOpen ? '▼' : '▶'}
                     </span>
                   </button>
-                  {leftAccOpen === 'schedule' && (
+                  {scheduleAccOpen && (
                     <div style={{ padding: '12px', borderTop: '1px solid #e5e7eb' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
@@ -686,7 +689,7 @@ export const MilestoneCalculator: React.FC = () => {
                 >
                   <button
                     type="button"
-                    aria-expanded={leftAccOpen === 'extra'}
+                    aria-expanded={extraAccOpen}
                     onClick={() => toggleLeftAcc('extra')}
                     style={{
                       width: '100%',
@@ -696,7 +699,7 @@ export const MilestoneCalculator: React.FC = () => {
                       gap: '10px',
                       padding: '10px 12px',
                       border: 'none',
-                      backgroundColor: leftAccOpen === 'extra' ? '#eff6ff' : '#f8fafc',
+                      backgroundColor: extraAccOpen ? '#eff6ff' : '#f8fafc',
                       cursor: 'pointer',
                       fontSize: '13px',
                       fontWeight: 800,
@@ -706,10 +709,10 @@ export const MilestoneCalculator: React.FC = () => {
                   >
                     <span>추가 확인</span>
                     <span style={{ fontSize: '11px', color: '#64748b' }} aria-hidden>
-                      {leftAccOpen === 'extra' ? '▼' : '▶'}
+                      {extraAccOpen ? '▼' : '▶'}
                     </span>
                   </button>
-                  {leftAccOpen === 'extra' && (
+                  {extraAccOpen && (
                     <div style={{ padding: '12px', borderTop: '1px solid #e5e7eb' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
                         <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px', alignItems: 'start' }}>
