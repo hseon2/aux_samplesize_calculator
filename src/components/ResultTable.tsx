@@ -15,9 +15,19 @@ interface ResultTableProps {
   results: TestDurationResult[];
   showCartMetrics?: boolean;
   showOrderMetrics?: boolean;
+  selectedSiteCodes?: string[];
+  onToggleSiteCode?: (siteCode: string) => void;
+  onToggleAll?: (checked: boolean) => void;
 }
 
-export const ResultTable: React.FC<ResultTableProps> = ({ results, showCartMetrics = true, showOrderMetrics = true }) => {
+export const ResultTable: React.FC<ResultTableProps> = ({
+  results,
+  showCartMetrics = true,
+  showOrderMetrics = true,
+  selectedSiteCodes = [],
+  onToggleSiteCode,
+  onToggleAll,
+}) => {
   const [sortKey, setSortKey] = useState<SortKey | null>('minDaysForOrder');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
@@ -136,6 +146,13 @@ export const ResultTable: React.FC<ResultTableProps> = ({ results, showCartMetri
     fontSize: '13px',
   };
 
+  const showSelection = Boolean(onToggleSiteCode);
+  const selectedSet = useMemo(() => new Set(selectedSiteCodes), [selectedSiteCodes]);
+  const allCodes = useMemo(() => Array.from(new Set(sortedResults.map(r => r.siteCode).filter(Boolean))).sort(), [sortedResults]);
+  const selectedCountInView = useMemo(() => allCodes.filter(c => selectedSet.has(c)).length, [allCodes, selectedSet]);
+  const allChecked = showSelection && allCodes.length > 0 && selectedCountInView === allCodes.length;
+  const indeterminate = showSelection && selectedCountInView > 0 && selectedCountInView < allCodes.length;
+
   return (
     <div style={{
       backgroundColor: '#ffffff',
@@ -154,7 +171,13 @@ export const ResultTable: React.FC<ResultTableProps> = ({ results, showCartMetri
       }}>
         <span style={{ fontSize: '15px', fontWeight: 700, color: '#111827' }}>계산 결과</span>
         <span style={{ fontSize: '12px', color: '#6b7280' }}>
-          총 <strong style={{ color: '#2563eb' }}>{sortedResults.length}</strong>개 · 컬럼 클릭 시 정렬
+          총 <strong style={{ color: '#2563eb' }}>{sortedResults.length}</strong>개
+          {showSelection && (
+            <>
+              {' '}· 선택 <strong style={{ color: '#2563eb' }}>{selectedCountInView}</strong>개
+            </>
+          )}
+          {' '}· 컬럼 클릭 시 정렬
         </span>
       </div>
 
@@ -167,6 +190,21 @@ export const ResultTable: React.FC<ResultTableProps> = ({ results, showCartMetri
         }}>
           <thead>
             <tr style={{ backgroundColor: '#1e293b', color: '#f1f5f9' }}>
+              {showSelection && (
+                <th
+                  rowSpan={2}
+                  style={{ ...thBase, border: '1px solid #0f172a', textAlign: 'center', whiteSpace: 'nowrap', width: 44, padding: '11px 10px' }}
+                  title="전체 선택/해제"
+                >
+                  <input
+                    type="checkbox"
+                    checked={allChecked}
+                    ref={(el) => { if (el) el.indeterminate = indeterminate; }}
+                    onChange={(e) => onToggleAll?.(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                </th>
+              )}
               <th rowSpan={2} style={{ ...thBase, border: '1px solid #0f172a', textAlign: 'left', whiteSpace: 'nowrap' }}>Site Code</th>
               <th rowSpan={2} style={{ ...thBase, border: '1px solid #0f172a', textAlign: 'right', whiteSpace: 'nowrap' }}>Daily Visits</th>
               <th rowSpan={2} style={{ ...thBase, border: '1px solid #0f172a', textAlign: 'right', whiteSpace: 'nowrap' }}>Daily Cart</th>
@@ -195,6 +233,16 @@ export const ResultTable: React.FC<ResultTableProps> = ({ results, showCartMetri
                 key={index}
                 style={{ backgroundColor: index % 2 === 0 ? '#fff' : '#f8fafc' }}
               >
+                {showSelection && (
+                  <td style={{ ...tdBase, textAlign: 'center', padding: '10px 10px' }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(row.siteCode)}
+                      onChange={() => onToggleSiteCode?.(row.siteCode)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                  </td>
+                )}
                 <td style={{ ...tdBase, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap' }}>
                   {row.siteCode}
                 </td>
