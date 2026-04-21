@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as ExcelJS from 'exceljs';
 import { FileUpload } from './components/FileUpload';
 import { ApiDataLoader } from './components/ApiDataLoader';
@@ -30,7 +30,11 @@ const makeId = () => {
   return `tp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
 
+const isUnspecifiedSiteCode = (siteCode: string) =>
+  String(siteCode ?? '').trim().toLowerCase() === 'unspecified';
+
 function App() {
+  const SUMMARY_TAB_ID = '__summary__';
   const [rawData, setRawData] = useState<RawDataRow[]>([]);
   const [segmentLabels, setSegmentLabels] = useState<ReturnType<typeof extractSegmentLabels>>([]);
   const [, setParsedData] = useState<ReturnType<typeof parseData>>([]);
@@ -52,6 +56,13 @@ function App() {
   const [view, setView] = useState<'setup' | 'result'>('setup');
   const [dataSource, setDataSource] = useState<'file' | 'api'>('file');
   const [activeTool, setActiveTool] = useState<'sample-size' | 'milestone'>('sample-size');
+
+  /** true면 Site Code가 Unspecified인 행을 표/엑셀에서 제외 (기본: 제외) */
+  const [excludeUnspecified, setExcludeUnspecified] = useState(true);
+  /** Summary 탭에서 선택한 Site Code */
+  const [summarySelectedSiteCodes, setSummarySelectedSiteCodes] = useState<string[]>([]);
+  /** "선택 다운로드" 체크박스(선택 모드)를 노출할 탭 id */
+  const [selectionModeTabId, setSelectionModeTabId] = useState<string | null>(null);
 
   const [inputParams, setInputParams] = useState<InputParams>({
     rangeDays: 30,
@@ -97,6 +108,25 @@ function App() {
     setTargetPages([first]);
     setActiveTargetPageId(first.id);
   };
+
+  useEffect(() => {
+    if (!excludeUnspecified) return;
+    setTargetPages((prev) => {
+      let changed = false;
+      const next = prev.map((tp) => {
+        const filtered = tp.selectedSiteCodes.filter((c) => !isUnspecifiedSiteCode(c));
+        if (filtered.length !== tp.selectedSiteCodes.length) changed = true;
+        return { ...tp, selectedSiteCodes: filtered };
+      });
+      return changed ? next : prev;
+    });
+    setSummarySelectedSiteCodes((prev) => prev.filter((c) => !isUnspecifiedSiteCode(c)));
+  }, [excludeUnspecified]);
+
+  // 탭 변경 시 선택 모드는 해제(체크박스 숨김)
+  useEffect(() => {
+    setSelectionModeTabId(null);
+  }, [activeTargetPageId]);
 
   const updateTargetPage = (id: string, patch: Partial<TargetPageSet>) => {
     setTargetPages(prev => prev.map(tp => tp.id === id ? { ...tp, ...patch } : tp));
@@ -153,7 +183,8 @@ function App() {
       }
 
       setTargetPages(nextPages);
-      setActiveTargetPageId(nextPages[0]?.id ?? activeTargetPageId);
+      // Target Page가 여러 개면 결과 기본 탭은 Summary
+      setActiveTargetPageId(nextPages.length > 1 ? SUMMARY_TAB_ID : (nextPages[0]?.id ?? activeTargetPageId));
 
       setError('');
       setView('result');
@@ -183,6 +214,7 @@ function App() {
   type ExportRow = {
     siteCode: string;
     targetPage: string;
+    targetPageOrder: number; // Target Page 추가 순서(0부터)
     dailyVisits: number | '';
     cartCVR: number | '';
     cart5: number | string | '';
@@ -202,9 +234,11 @@ function App() {
       const showCart = Boolean(tp.cartAddLabel);
       const showOrder = Boolean(tp.orderLabel);
       tp.results.forEach((r) => {
+        if (excludeUnspecified && isUnspecifiedSiteCode(r.siteCode)) return;
         rows.push({
           siteCode: r.siteCode,
           targetPage,
+          targetPageOrder: idx,
           // Daily Visits는 엑셀에서 정수로 반올림 표시
           dailyVisits: Math.round(r.dailyVisits),
           cartCVR: showCart ? r.cartCVR : '',
@@ -232,9 +266,11 @@ function App() {
     const targetPage = (active.visitsLabel || 'Target Page').trim();
     return active.results
       .filter((r) => selectedSet.has(r.siteCode))
+      .filter((r) => !excludeUnspecified || !isUnspecifiedSiteCode(r.siteCode))
       .map((r) => ({
         siteCode: r.siteCode,
         targetPage,
+        targetPageOrder: 0,
         dailyVisits: Math.round(r.dailyVisits),
         cartCVR: showCart ? r.cartCVR : '',
         cart5: showCart ? r.cartTestDuration5Percent : '',
@@ -247,125 +283,435 @@ function App() {
       }));
   };
 
+  const buildExportRowsSelectedSummary = (selected: string[]): ExportRow[] => {
+    if (!selected || selected.length === 0) return [];
+    const selectedSet = new Set(selected);
+    const rows: ExportRow[] = [];
+    targetPages.forEach((tp, idx) => {
+      if (!tp.results || tp.results.length === 0) return;
+      const targetPage = (tp.visitsLabel || `Target Page ${idx + 1}`).trim();
+      const showCart = Boolean(tp.cartAddLabel);
+      const showOrder = Boolean(tp.orderLabel);
+      tp.results.forEach((r) => {
+        if (!selectedSet.has(r.siteCode)) return;
+        if (excludeUnspecified && isUnspecifiedSiteCode(r.siteCode)) return;
+        rows.push({
+          siteCode: r.siteCode,
+          targetPage,
+          targetPageOrder: idx,
+          dailyVisits: Math.round(r.dailyVisits),
+          cartCVR: showCart ? r.cartCVR : '',
+          cart5: showCart ? r.cartTestDuration5Percent : '',
+          cart10: showCart ? r.cartTestDuration10Percent : '',
+          orderCVR: showOrder ? r.orderCVR : '',
+          order5: showOrder ? r.orderTestDuration5Percent : '',
+          order10: showOrder ? r.orderTestDuration10Percent : '',
+          minCart: showCart ? r.minDaysForCart : '',
+          minOrder: showOrder ? r.minDaysForOrder : '',
+        });
+      });
+    });
+    return rows;
+  };
+
   const writeWorkbookAndDownload = async (rows: ExportRow[], fileName: string) => {
     if (rows.length === 0) return;
 
-    const sortedRows = [...rows].sort((a, b) => {
-      const sc = a.siteCode.localeCompare(b.siteCode);
-      if (sc !== 0) return sc;
-      return a.targetPage.localeCompare(b.targetPage);
+    const toNumForSort = (v: number | string | ''): number | null => {
+      if (v === '' || v === null || v === undefined) return null;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      const n = Number(String(v).replace(/,/g, '').trim());
+      return Number.isFinite(n) ? n : null;
+    };
+
+    // 정렬 시 0은 "의미 없는 값"으로 보고 최하단으로 보낸다.
+    const normalizeSortKey = (n: number | null): number => {
+      if (n === null) return Infinity;
+      if (!Number.isFinite(n)) return Infinity;
+      if (n === 0) return Infinity;
+      return n;
+    };
+
+    // 엑셀 행 정렬:
+    // - Site Code 기준으로 묶음 유지
+    // - Site Code 내 Target Page가 여러 개면 "첫 번째 Target Page 행"의 H(=minCart) 값으로만 그룹 정렬
+    // - 그룹 내부는 Target Page 오름차순
+    const rowsBySite = new Map<string, ExportRow[]>();
+    rows.forEach((r) => {
+      const key = String(r.siteCode ?? '');
+      const list = rowsBySite.get(key) ?? [];
+      list.push(r);
+      rowsBySite.set(key, list);
     });
+
+    const siteGroups = Array.from(rowsBySite.entries()).map(([siteCode, groupRows]) => {
+      // Target Page는 "추가했던 순서" 기준으로 정렬
+      const within = [...groupRows].sort((a, b) => {
+        if (a.targetPageOrder !== b.targetPageOrder) return a.targetPageOrder - b.targetPageOrder;
+        return a.targetPage.localeCompare(b.targetPage);
+      });
+      const first = within[0];
+      const firstKey = first ? normalizeSortKey(toNumForSort(first.minCart)) : Infinity; // H 기준
+      const secondKey = first ? normalizeSortKey(toNumForSort(first.minOrder)) : Infinity; // L 기준
+      return { siteCode, firstKey, secondKey, rows: within };
+    });
+
+    siteGroups.sort((a, b) => {
+      if (a.firstKey !== b.firstKey) return a.firstKey - b.firstKey; // asc
+      if (a.secondKey !== b.secondKey) return a.secondKey - b.secondKey; // asc
+      return a.siteCode.localeCompare(b.siteCode);
+    });
+
+    const sortedRows = siteGroups.flatMap((g) => g.rows);
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'AB Test Sample Size Calculator';
     wb.created = new Date();
 
-    const ws = wb.addWorksheet(safeSheetName('AB Test Results', 'Results'));
+    // ── 스타일 토큰 ─────────────────────────────────────────────
+    const WHITE = 'FFFFFFFF';
+    const BORDER_LIGHT_GRAY = 'FF9CA3AF';
+    // 서비스 테이블 헤더 컬러와 통일
+    const HEADER_BASE = 'FF1F2937'; // #1f2937
+    const HEADER_SUB = 'FF334155'; // #334155
+    const CART_GROUP = 'FF13523C'; // #13523c
+    const CART_SUB = 'FF038658'; // #038658 (연한 부분만)
+    const ORDER_GROUP = 'FF1E3A8A'; // #1e3a8a
+    const ORDER_SUB = 'FF2B61DD'; // #2b61dd (5%/10% uplift 배경 더 연하게)
+    const HEADER_TEXT = 'FFF8FAFC'; // #f8fafc
+    const YELLOW = 'FFFFE699'; // <= 14 (차분한 개나리)
+    const YELLOW_LIGHT = 'FFFFF2CC'; // 15~30 (차분한 연개나리)
 
-    const headers = [
-      'Site Code', // A
-      'Target Page', // B
-      'Daily Visits', // C
-      'Cart CVR', // D
-      '5% uplift', // E
-      '10% uplift', // F
-      'Order CVR', // G
-      '5% uplift', // H
-      '10% uplift', // I
-      '(각 그룹당 100건 이상)', // J (sub header)
-      '(각 그룹당 100건 이상)', // K (sub header)
-    ];
-
-    // 최상단: data range 표시 (요청)
-    const rangeText = buildDataRangeLabel();
-    const titleRow = ws.addRow([`Data range: ${rangeText}`]);
-    ws.addRow([]);
-    const headerRowTop = ws.addRow([
-      'Site Code',
-      'Target Page',
-      'Daily Visits',
-      'Add to Cart CVR 기반 예상 테스트 기간',
-      '',
-      '',
-      'Order CVR 기반 예상 테스트 기간',
-      '',
-      '',
-      'Cart 기준 모수 확보 일수',
-      'Order 기준 모수 확보 일수',
-    ]);
-    const headerRowBottom = ws.addRow(headers);
-
-    // data range 행 스타일 + 병합
-    titleRow.font = { bold: true };
-    ws.mergeCells(1, 1, 1, headers.length);
-
-    // 헤더 병합 (3~4행)
-    // A,B,C,J,K는 2행 헤더를 세로 병합
-    ws.mergeCells(3, 1, 4, 1); // Site Code
-    ws.mergeCells(3, 2, 4, 2); // Target Page
-    ws.mergeCells(3, 3, 4, 3); // Daily Visits
-    // Cart/Order 그룹 헤더는 가로 병합
-    ws.mergeCells(3, 4, 3, 6); // Add to Cart group (D~F)
-    ws.mergeCells(3, 7, 3, 9); // Order group (G~I)
-
-    // 헤더 스타일 (첫행 고정 해제: views 설정하지 않음)
-    headerRowTop.font = { bold: true };
-    headerRowBottom.font = { bold: true };
-    const headerStyle = {
-      vertical: 'middle' as const,
-      horizontal: 'center' as const,
-      wrapText: true,
+    const setFill = (cell: ExcelJS.Cell, argb: string) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } };
     };
-    [headerRowTop, headerRowBottom].forEach((r) => {
-      r.alignment = headerStyle;
-      r.eachCell((cell) => {
-        cell.alignment = headerStyle;
-      });
-    });
+    const setBorder = (cell: ExcelJS.Cell, argb: string) => {
+      cell.border = {
+        top: { style: 'thin', color: { argb } },
+        left: { style: 'thin', color: { argb } },
+        bottom: { style: 'thin', color: { argb } },
+        right: { style: 'thin', color: { argb } },
+      };
+    };
+    const center = { vertical: 'middle' as const, horizontal: 'center' as const, wrapText: false };
 
-    // 컬럼 너비
-    const widths = [16, 36, 14, 12, 18, 19, 12, 19, 20, 16, 16];
-    widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
-    // 퍼센트 포맷
-    ws.getColumn(4).numFmt = '0.00%'; // Cart CVR
-    ws.getColumn(7).numFmt = '0.00%'; // Order CVR
+    const buildSheet = (opts: {
+      sheetName: string;
+      sheetRows: ExportRow[];
+      includeTargetPage: boolean;
+      enableCountryDividerDouble: boolean;
+    }) => {
+      const ws = wb.addWorksheet(safeSheetName(opts.sheetName, opts.sheetName));
+      // 엑셀 기본 보기 확대/축소 비율(줌): 85%
+      // Freeze(첫 행 고정)는 설정하지 않음
+      ws.views = [{ state: 'normal', zoomScale: 85 }];
 
-    sortedRows.forEach((r) => {
-      ws.addRow([
-        r.siteCode,
-        r.targetPage,
-        r.dailyVisits,
-        r.cartCVR,
-        r.cart5,
-        r.cart10,
-        r.orderCVR,
-        r.order5,
-        r.order10,
-        r.minCart,
-        r.minOrder,
-      ]);
-    });
+      const includeTarget = opts.includeTargetPage;
+      const metaRows = 3;
+      const headerTopRow = 4;
+      const headerBottomRow = 5;
+      const firstDataRow = 6;
+      const tableFirstCol = 2; // B
+      const tableLastCol = includeTarget ? 12 : 11; // L or K
 
-    // Site Code(A열) 기준으로 같은 국가를 세로 병합해 "묶기"
-    // 데이터 시작 행: 5행 (1=data range, 2=blank, 3~4=header)
-    const firstDataRow = 5;
-    const lastDataRow = ws.rowCount;
-    if (lastDataRow >= firstDataRow) {
-      let groupStart = firstDataRow;
-      let current = String(ws.getRow(firstDataRow).getCell(1).value ?? '');
-      for (let r = firstDataRow + 1; r <= lastDataRow + 1; r++) {
-        const next = r <= lastDataRow ? String(ws.getRow(r).getCell(1).value ?? '') : '__END__';
-        if (next !== current) {
-          const groupEnd = r - 1;
-          if (groupEnd > groupStart && current) {
-            ws.mergeCells(groupStart, 1, groupEnd, 1);
-            ws.getRow(groupStart).getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
-          }
-          groupStart = r;
-          current = next;
+      // A열(여백) 추가: 열 너비 8
+      ws.getColumn(1).width = 8;
+
+      // ── Row 1~3 meta ─────────────────────────────────────────
+      const rangeText = buildDataRangeLabel();
+      ws.addRow([]); // Row 1 (빈 행)
+      ws.addRow(['', `Data range: ${rangeText}`]); // Row 2
+      ws.addRow([]); // Row 3
+
+      // ── Header (Row 4~5) ─────────────────────────────────────
+      if (includeTarget) {
+        ws.addRow(['', 'Site Code', 'Target Page', 'Daily Visits', 'Add to Cart CVR 기반 예상 테스트 기간', '', '', '', 'Order CVR 기반 예상 테스트 기간', '', '', '']);
+        ws.addRow(['', 'Site Code', 'Target Page', 'Daily Visits', 'Cart CVR', '5% uplift', '10% uplift', 'Cart 기준 모수 확보 일수\n(각 그룹당 100건 이상)', 'Order CVR', '5% uplift', '10% uplift', 'Order 기준 모수 확보 일수\n(각 그룹당 100건 이상)']);
+        ws.mergeCells(headerTopRow, 2, headerBottomRow, 2); // Site Code
+        ws.mergeCells(headerTopRow, 3, headerBottomRow, 3); // Target Page
+        ws.mergeCells(headerTopRow, 4, headerBottomRow, 4); // Daily Visits
+        ws.mergeCells(headerTopRow, 5, headerTopRow, 8); // Cart group
+        ws.mergeCells(headerTopRow, 9, headerTopRow, 12); // Order group
+
+        // widths
+        ws.getColumn(2).width = 12;
+        ws.getColumn(3).width = 36;
+        ws.getColumn(4).width = 12;
+        ws.getColumn(5).width = 12;
+        ws.getColumn(6).width = 12;
+        ws.getColumn(7).width = 12;
+        ws.getColumn(8).width = 25;
+        ws.getColumn(9).width = 12;
+        ws.getColumn(10).width = 12;
+        ws.getColumn(11).width = 12;
+        ws.getColumn(12).width = 25;
+      } else {
+        ws.addRow(['', 'Site Code', 'Daily Visits', 'Add to Cart CVR 기반 예상 테스트 기간', '', '', '', 'Order CVR 기반 예상 테스트 기간', '', '', '']);
+        ws.addRow(['', 'Site Code', 'Daily Visits', 'Cart CVR', '5% uplift', '10% uplift', 'Cart 기준 모수 확보 일수\n(각 그룹당 100건 이상)', 'Order CVR', '5% uplift', '10% uplift', 'Order 기준 모수 확보 일수\n(각 그룹당 100건 이상)']);
+        ws.mergeCells(headerTopRow, 2, headerBottomRow, 2); // Site Code
+        ws.mergeCells(headerTopRow, 3, headerBottomRow, 3); // Daily Visits
+        ws.mergeCells(headerTopRow, 4, headerTopRow, 7); // Cart group
+        ws.mergeCells(headerTopRow, 8, headerTopRow, 11); // Order group
+
+        // widths
+        ws.getColumn(2).width = 12;
+        ws.getColumn(3).width = 12;
+        ws.getColumn(4).width = 12;
+        ws.getColumn(5).width = 12;
+        ws.getColumn(6).width = 12;
+        ws.getColumn(7).width = 25;
+        ws.getColumn(8).width = 12;
+        ws.getColumn(9).width = 12;
+        ws.getColumn(10).width = 12;
+        ws.getColumn(11).width = 25;
+      }
+
+      // ── 기본 서식: 상단(meta+header) 흰 배경/흰 테두리 ─────────
+      for (let r = 1; r <= headerBottomRow; r++) {
+        const row = ws.getRow(r);
+        for (let c = 1; c <= tableLastCol; c++) {
+          const cell = row.getCell(c);
+          setFill(cell, WHITE);
+          setBorder(cell, WHITE);
+          cell.alignment = center;
         }
       }
+
+      // 헤더 색/텍스트
+      const r4 = ws.getRow(headerTopRow);
+      const r5 = ws.getRow(headerBottomRow);
+      if (includeTarget) {
+        [2, 3, 4].forEach((c) => setFill(r4.getCell(c), HEADER_BASE));
+        [5, 6, 7, 8].forEach((c) => setFill(r4.getCell(c), CART_GROUP));
+        [9, 10, 11, 12].forEach((c) => setFill(r4.getCell(c), ORDER_GROUP));
+        [2, 3, 4].forEach((c) => setFill(r5.getCell(c), HEADER_SUB));
+        // uplift 헤더는 진한색, 모수 헤더는 연한색
+        [5, 6, 7].forEach((c) => setFill(r5.getCell(c), CART_GROUP));
+        setFill(r5.getCell(8), CART_SUB);
+        [9, 10, 11].forEach((c) => setFill(r5.getCell(c), ORDER_GROUP));
+        setFill(r5.getCell(12), ORDER_SUB);
+      } else {
+        [2, 3].forEach((c) => setFill(r4.getCell(c), HEADER_BASE));
+        [4, 5, 6, 7].forEach((c) => setFill(r4.getCell(c), CART_GROUP));
+        [8, 9, 10, 11].forEach((c) => setFill(r4.getCell(c), ORDER_GROUP));
+        [2, 3].forEach((c) => setFill(r5.getCell(c), HEADER_SUB));
+        // uplift 헤더는 진한색, 모수 헤더는 연한색
+        [4, 5, 6].forEach((c) => setFill(r5.getCell(c), CART_GROUP));
+        setFill(r5.getCell(7), CART_SUB);
+        [8, 9, 10].forEach((c) => setFill(r5.getCell(c), ORDER_GROUP));
+        setFill(r5.getCell(11), ORDER_SUB);
+      }
+
+      // 헤더 텍스트 색상(흰색)
+      [headerTopRow, headerBottomRow].forEach((rr) => {
+        const row = ws.getRow(rr);
+        for (let c = 2; c <= tableLastCol; c++) {
+          row.getCell(c).font = { ...(row.getCell(c).font ?? {}), bold: true, color: { argb: HEADER_TEXT } };
+        }
+      });
+      // 요청: E5~L5(혹은 대응 범위)는 bold 해제
+      const bottomBoldStart = includeTarget ? 5 : 4;
+      for (let c = bottomBoldStart; c <= tableLastCol; c++) {
+        const cell = ws.getRow(headerBottomRow).getCell(c);
+        cell.font = { ...(cell.font ?? {}), bold: false, color: { argb: HEADER_TEXT } };
+      }
+
+      // 헤더 정렬/테두리
+      for (let r = headerTopRow; r <= headerBottomRow; r++) {
+        const row = ws.getRow(r);
+        for (let c = 2; c <= tableLastCol; c++) {
+          const cell = row.getCell(c);
+          cell.alignment = center;
+          setBorder(cell, BORDER_LIGHT_GRAY);
+        }
+      }
+
+      // Data range가 있는 B2는 왼쪽 정렬
+      ws.getRow(2).getCell(2).alignment = { vertical: 'middle', horizontal: 'left', wrapText: false };
+
+      // 모수 헤더 줄바꿈 허용
+      if (includeTarget) {
+        ws.getRow(headerBottomRow).getCell(8).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        ws.getRow(headerBottomRow).getCell(12).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      } else {
+        ws.getRow(headerBottomRow).getCell(7).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        ws.getRow(headerBottomRow).getCell(11).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      }
+      ws.getRow(headerTopRow).height = 32;
+      ws.getRow(headerBottomRow).height = 44;
+
+      // 포맷
+      const cartCvrCol = includeTarget ? 5 : 4;
+      const orderCvrCol = includeTarget ? 9 : 8;
+      ws.getColumn(cartCvrCol).numFmt = '0.00%';
+      ws.getColumn(orderCvrCol).numFmt = '0.00%';
+      const commaCols = includeTarget ? [6, 7, 8, 10, 11, 12] : [5, 6, 7, 9, 10, 11];
+      commaCols.forEach((col) => { ws.getColumn(col).numFmt = '#,##0'; });
+
+      // 데이터 행
+      opts.sheetRows.forEach((r) => {
+        ws.addRow(includeTarget
+          ? ['', r.siteCode, r.targetPage, r.dailyVisits, r.cartCVR, r.cart5, r.cart10, r.minCart, r.orderCVR, r.order5, r.order10, r.minOrder]
+          : ['', r.siteCode, r.dailyVisits, r.cartCVR, r.cart5, r.cart10, r.minCart, r.orderCVR, r.order5, r.order10, r.minOrder]
+        );
+      });
+
+      const lastDataRow = ws.rowCount;
+      const tableFirstRow = headerTopRow;
+      const tableLastRow = Math.max(lastDataRow, headerBottomRow);
+
+      // 테이블 스타일
+      for (let r = tableFirstRow; r <= tableLastRow; r++) {
+        const row = ws.getRow(r);
+        for (let c = tableFirstCol; c <= tableLastCol; c++) {
+          const cell = row.getCell(c);
+          cell.alignment = center;
+          if (r >= firstDataRow) setFill(cell, WHITE);
+          setBorder(cell, BORDER_LIGHT_GRAY);
+        }
+      }
+
+      // 데이터 행 높이
+      for (let r = firstDataRow; r <= lastDataRow; r++) ws.getRow(r).height = 20;
+
+      // 조건부 배경색(일수)
+      const dayCols = includeTarget ? [6, 7, 8, 10, 11, 12] : [5, 6, 7, 9, 10, 11];
+      const getNumeric = (v: unknown): number | null => {
+        if (v === null || v === undefined) return null;
+        if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+        const s = String(v).trim();
+        if (!s) return null;
+        const n = Number(s.replace(/,/g, ''));
+        return Number.isFinite(n) ? n : null;
+      };
+      for (let r = firstDataRow; r <= lastDataRow; r++) {
+        dayCols.forEach((c) => {
+          const cell = ws.getRow(r).getCell(c);
+          const n = getNumeric(cell.value);
+          if (n === null) return;
+          if (n <= 14) setFill(cell, YELLOW);
+          else if (n <= 30) setFill(cell, YELLOW_LIGHT);
+        });
+      }
+
+      // 표 바깥 흰 배경/흰 테두리 + A열 여백 흰 처리
+      for (let r = 1; r <= lastDataRow; r++) {
+        const a = ws.getRow(r).getCell(1);
+        setFill(a, WHITE);
+        setBorder(a, WHITE);
+        a.alignment = center;
+      }
+      for (let r = 1; r <= metaRows; r++) {
+        const row = ws.getRow(r);
+        for (let c = 1; c <= tableLastCol; c++) {
+          const cell = row.getCell(c);
+          setFill(cell, WHITE);
+          setBorder(cell, WHITE);
+          cell.alignment = center;
+        }
+      }
+      // 표 바깥 영역(L~S)은 흰 배경/흰 테두리로 강제
+      // - Summary 시트는 L이 테이블 컬럼이므로 M(13)부터
+      // - Target Page별 시트는 L(12)부터
+      const outsideStartCol = includeTarget ? 13 : 12; // M or L
+      const outsideEndCol = 19; // S
+      for (let r = 1; r <= Math.max(lastDataRow, 200); r++) {
+        const row = ws.getRow(r);
+        for (let c = outsideStartCol; c <= outsideEndCol; c++) {
+          const cell = row.getCell(c);
+          setFill(cell, WHITE);
+          setBorder(cell, WHITE);
+          cell.alignment = center;
+        }
+      }
+      // 테이블 끝~200 흰
+      for (let r = tableLastRow; r <= 200; r++) {
+        const row = ws.getRow(r);
+        for (let c = 1; c <= 19; c++) {
+          const inTable = r >= tableFirstRow && r <= tableLastRow && c >= tableFirstCol && c <= tableLastCol;
+          if (inTable) continue;
+          const cell = row.getCell(c);
+          setFill(cell, WHITE);
+          setBorder(cell, WHITE);
+          cell.alignment = center;
+        }
+      }
+
+      // 마지막 강제(정렬/랩)
+      ws.getRow(2).getCell(2).alignment = { vertical: 'middle', horizontal: 'left', wrapText: false };
+      if (includeTarget) {
+        ws.getRow(headerBottomRow).getCell(8).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        ws.getRow(headerBottomRow).getCell(12).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      } else {
+        ws.getRow(headerBottomRow).getCell(7).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        ws.getRow(headerBottomRow).getCell(11).alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      }
+      ws.getRow(headerTopRow).height = 32;
+      ws.getRow(headerBottomRow).height = 44;
+
+      // Site Code 병합(항상 B열)
+      if (lastDataRow >= firstDataRow) {
+        let groupStart = firstDataRow;
+        let current = String(ws.getRow(firstDataRow).getCell(2).value ?? '');
+        for (let r = firstDataRow + 1; r <= lastDataRow + 1; r++) {
+          const next = r <= lastDataRow ? String(ws.getRow(r).getCell(2).value ?? '') : '__END__';
+          if (next !== current) {
+            const groupEnd = r - 1;
+            if (groupEnd > groupStart && current) {
+              ws.mergeCells(groupStart, 2, groupEnd, 2);
+              ws.getRow(groupStart).getCell(2).alignment = center;
+            }
+            groupStart = r;
+            current = next;
+          }
+        }
+      }
+
+      // 국가 간 double divider(마지막 행 제외)
+      if (opts.enableCountryDividerDouble && opts.sheetRows.length > 0) {
+        const setBottomBorderDouble = (cell: ExcelJS.Cell) => {
+          const prev = cell.border ?? {};
+          cell.border = {
+            top: prev.top ?? { style: 'thin', color: { argb: BORDER_LIGHT_GRAY } },
+            left: prev.left ?? { style: 'thin', color: { argb: BORDER_LIGHT_GRAY } },
+            right: prev.right ?? { style: 'thin', color: { argb: BORDER_LIGHT_GRAY } },
+            bottom: { style: 'double', color: { argb: BORDER_LIGHT_GRAY } },
+          };
+        };
+        for (let i = 0; i < opts.sheetRows.length; i++) {
+          const cur = String(opts.sheetRows[i]?.siteCode ?? '');
+          const next = i + 1 < opts.sheetRows.length ? String(opts.sheetRows[i + 1]?.siteCode ?? '') : '';
+          if (!cur || cur === next || i === opts.sheetRows.length - 1) continue;
+          const rowIdx = firstDataRow + i;
+          for (let c = tableFirstCol; c <= tableLastCol; c++) setBottomBorderDouble(ws.getRow(rowIdx).getCell(c));
+        }
+      }
+    };
+
+    const uniqueTargetOrders = Array.from(new Set(sortedRows.map((r) => r.targetPageOrder))).sort((a, b) => a - b);
+    const hasMultipleTargetPages = uniqueTargetOrders.length > 1;
+
+    // Summary 시트(기존 그대로: Target Page 포함)
+    buildSheet({
+      sheetName: 'Summary',
+      sheetRows: sortedRows,
+      includeTargetPage: true,
+      enableCountryDividerDouble: hasMultipleTargetPages,
+    });
+
+    // Target Page별 시트(여러 개일 때만): Target Page 컬럼 제외
+    if (hasMultipleTargetPages) {
+      uniqueTargetOrders.forEach((order) => {
+        const sheetRows = sortedRows.filter((r) => r.targetPageOrder === order);
+        const title = sheetRows[0]?.targetPage?.trim() || `Target Page ${order + 1}`;
+        buildSheet({
+          sheetName: title,
+          sheetRows,
+          includeTargetPage: false,
+          enableCountryDividerDouble: false,
+        });
+      });
     }
 
     const buffer = await wb.xlsx.writeBuffer();
@@ -393,11 +739,30 @@ function App() {
 
   const downloadSelectedCountryExcel = async () => {
     try {
-      const rows = buildExportRowsSelected();
+      const rows = activeTargetPageId === SUMMARY_TAB_ID
+        ? buildExportRowsSelectedSummary(summarySelectedSiteCodes)
+        : buildExportRowsSelected();
       await writeWorkbookAndDownload(rows, 'ab-test-results_selected.xlsx');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Excel 다운로드 중 오류가 발생했습니다.');
     }
+  };
+
+  const enterSelectionMode = () => {
+    setSelectionModeTabId(activeTargetPageId);
+  };
+
+  const toggleSummarySiteCodeSelection = (siteCode: string) => {
+    setSummarySelectedSiteCodes((prev) => {
+      const set = new Set(prev);
+      if (set.has(siteCode)) set.delete(siteCode);
+      else set.add(siteCode);
+      return Array.from(set);
+    });
+  };
+
+  const toggleAllSummarySiteCodesSelection = (allCodes: string[], checked: boolean) => {
+    setSummarySelectedSiteCodes(checked ? [...allCodes] : []);
   };
 
   const toggleSiteCodeSelection = (tpId: string, siteCode: string) => {
@@ -847,13 +1212,16 @@ function App() {
                     >
                       📗 전체 Excel 다운로드
                     </button>
-                    <button
-                      onClick={downloadSelectedCountryExcel}
-                      disabled={!(() => {
+                    {(() => {
+                      const inSelectionMode = selectionModeTabId === activeTargetPageId;
+                      const selectedCount = (() => {
+                        if (activeTargetPageId === SUMMARY_TAB_ID) return summarySelectedSiteCodes.length;
                         const active = targetPages.find(tp => tp.id === activeTargetPageId) ?? targetPages[0];
-                        return Boolean(active?.selectedSiteCodes?.length);
-                      })()}
-                      style={{
+                        return active?.selectedSiteCodes?.length ?? 0;
+                      })();
+                      const canDownload = selectedCount > 0;
+
+                      const baseBtn: React.CSSProperties = {
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '6px',
@@ -864,23 +1232,71 @@ function App() {
                         border: `1.5px solid ${ds.border}`,
                         backgroundColor: ds.surface,
                         color: ds.textPrimary,
-                        cursor: (() => {
-                          const active = targetPages.find(tp => tp.id === activeTargetPageId) ?? targetPages[0];
-                          return active?.selectedSiteCodes?.length ? 'pointer' : 'not-allowed';
-                        })(),
-                        opacity: (() => {
-                          const active = targetPages.find(tp => tp.id === activeTargetPageId) ?? targetPages[0];
-                          return active?.selectedSiteCodes?.length ? 1 : 0.55;
-                        })(),
-                      }}
-                      title="표에서 Site Code를 체크하면 해당 데이터만 엑셀로 내려받습니다."
-                    >
-                      📗 선택 항목 Excel 다운로드
-                    </button>
+                        cursor: 'pointer',
+                      };
+
+                      if (!inSelectionMode) {
+                        return (
+                          <button
+                            onClick={enterSelectionMode}
+                            style={baseBtn}
+                            title="클릭하면 국가 선택(체크박스)이 노출됩니다."
+                          >
+                            📗 선택 항목 Excel 다운로드
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <>
+                          <button
+                            onClick={() => setSelectionModeTabId(null)}
+                            style={{
+                              ...baseBtn,
+                              backgroundColor: '#f3f4f6',
+                              color: '#374151',
+                              border: '1.5px solid #d1d5db',
+                            }}
+                            title="선택 모드 취소"
+                          >
+                            취소
+                          </button>
+                          <button
+                            onClick={downloadSelectedCountryExcel}
+                            disabled={!canDownload}
+                            style={{
+                              ...baseBtn,
+                              opacity: canDownload ? 1 : 0.55,
+                              cursor: canDownload ? 'pointer' : 'not-allowed',
+                            }}
+                            title={canDownload ? '선택한 국가만 엑셀로 내려받기' : '국가를 먼저 선택해주세요'}
+                          >
+                            다운로드
+                          </button>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
                 {targetPages.length > 1 && (
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                    <button
+                      key={SUMMARY_TAB_ID}
+                      onClick={() => setActiveTargetPageId(SUMMARY_TAB_ID)}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '999px',
+                        border: `1.5px solid ${activeTargetPageId === SUMMARY_TAB_ID ? ds.primary : ds.border}`,
+                        backgroundColor: activeTargetPageId === SUMMARY_TAB_ID ? ds.infoBg : ds.surface,
+                        color: activeTargetPageId === SUMMARY_TAB_ID ? ds.primary : ds.textMuted,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                      }}
+                      title="Summary"
+                    >
+                      Summary
+                    </button>
                     {targetPages.map((tp, idx) => {
                       const isActive = activeTargetPageId === tp.id;
                       const label = tp.visitsLabel || `Target Page ${idx + 1}`;
@@ -912,22 +1328,55 @@ function App() {
                 )}
 
                 {(() => {
+                  // Summary 탭: 모든 Target Page 결과를 합쳐서(Target Page 컬럼 포함) 표시
+                  if (targetPages.length > 1 && activeTargetPageId === SUMMARY_TAB_ID) {
+                    const summaryAll = targetPages.flatMap((tp, idx) => {
+                      const label = tp.visitsLabel || `Target Page ${idx + 1}`;
+                      return (tp.results ?? []).map((r) => ({ ...r, targetPageLabel: label, targetPageOrder: idx }));
+                    });
+                    const viewResults = excludeUnspecified
+                      ? summaryAll.filter((r) => !isUnspecifiedSiteCode(r.siteCode))
+                      : summaryAll;
+                    const allSiteCodes = Array.from(new Set(viewResults.map(r => r.siteCode).filter(Boolean))).sort();
+                    const showCart = targetPages.some((tp) => Boolean(tp.cartAddLabel));
+                    const showOrder = targetPages.some((tp) => Boolean(tp.orderLabel));
+                    return (
+                      <ResultTable
+                        results={viewResults}
+                        showCartMetrics={showCart}
+                        showOrderMetrics={showOrder}
+                        showTargetPageColumn
+                        hideDailyCartOrder
+                        groupBySiteCode
+                        disableSorting
+                        selectedSiteCodes={summarySelectedSiteCodes}
+                        onToggleSiteCode={selectionModeTabId === SUMMARY_TAB_ID ? toggleSummarySiteCodeSelection : undefined}
+                        onToggleAll={selectionModeTabId === SUMMARY_TAB_ID ? ((checked) => toggleAllSummarySiteCodesSelection(allSiteCodes, checked)) : undefined}
+                        excludeUnspecified={excludeUnspecified}
+                        onExcludeUnspecifiedChange={setExcludeUnspecified}
+                      />
+                    );
+                  }
+
                   const active = targetPages.find(tp => tp.id === activeTargetPageId) ?? targetPages[0];
                   const showCart = Boolean(active?.cartAddLabel);
                   const showOrder = Boolean(active?.orderLabel);
                   const allResults = active?.results ?? [];
-                  const allSiteCodes = Array.from(new Set(allResults.map(r => r.siteCode).filter(Boolean))).sort();
+                  const viewResults = excludeUnspecified
+                    ? allResults.filter((r) => !isUnspecifiedSiteCode(r.siteCode))
+                    : allResults;
+                  const allSiteCodes = Array.from(new Set(viewResults.map(r => r.siteCode).filter(Boolean))).sort();
                   return (
-                    <>
-                      <ResultTable
-                        results={allResults}
-                        showCartMetrics={showCart}
-                        showOrderMetrics={showOrder}
-                        selectedSiteCodes={active?.selectedSiteCodes ?? []}
-                        onToggleSiteCode={(siteCode) => { if (active) toggleSiteCodeSelection(active.id, siteCode); }}
-                        onToggleAll={(checked) => { if (active) toggleAllSiteCodesSelection(active.id, allSiteCodes, checked); }}
-                      />
-                    </>
+                    <ResultTable
+                      results={viewResults}
+                      showCartMetrics={showCart}
+                      showOrderMetrics={showOrder}
+                      selectedSiteCodes={active?.selectedSiteCodes ?? []}
+                      onToggleSiteCode={selectionModeTabId === activeTargetPageId ? ((siteCode) => { if (active) toggleSiteCodeSelection(active.id, siteCode); }) : undefined}
+                      onToggleAll={selectionModeTabId === activeTargetPageId ? ((checked) => { if (active) toggleAllSiteCodesSelection(active.id, allSiteCodes, checked); }) : undefined}
+                      excludeUnspecified={excludeUnspecified}
+                      onExcludeUnspecifiedChange={setExcludeUnspecified}
+                    />
                   );
                 })()}
               </>
