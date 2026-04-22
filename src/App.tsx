@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import * as ExcelJS from 'exceljs';
 import { FileUpload } from './components/FileUpload';
 import { ApiDataLoader } from './components/ApiDataLoader';
@@ -40,6 +40,7 @@ function App() {
   const [, setParsedData] = useState<ReturnType<typeof parseData>>([]);
   type TargetPageSet = {
     id: string;
+    displayName: string; // 사용자가 지정하는 Target Page 표시명
     visitsLabel: string;
     cartAddLabel: string;
     orderLabel: string;
@@ -49,7 +50,7 @@ function App() {
   };
   const [initialTargetPageId] = useState(() => makeId());
   const [targetPages, setTargetPages] = useState<TargetPageSet[]>(() => ([
-    { id: initialTargetPageId, visitsLabel: '', cartAddLabel: '', orderLabel: '', siteCodes: [], selectedSiteCodes: [], results: [] },
+    { id: initialTargetPageId, displayName: '', visitsLabel: '', cartAddLabel: '', orderLabel: '', siteCodes: [], selectedSiteCodes: [], results: [] },
   ]));
   const [activeTargetPageId, setActiveTargetPageId] = useState<string>(() => initialTargetPageId);
   const [error, setError] = useState<string>('');
@@ -63,6 +64,29 @@ function App() {
   const [summarySelectedSiteCodes, setSummarySelectedSiteCodes] = useState<string[]>([]);
   /** "선택 다운로드" 체크박스(선택 모드)를 노출할 탭 id */
   const [selectionModeTabId, setSelectionModeTabId] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  // 추천 조건(적용값) + 편집용(draft)
+  const [suggestCartLimitDays, setSuggestCartLimitDays] = useState<number>(14);
+  const [suggestUseOrderLimit, setSuggestUseOrderLimit] = useState<boolean>(true);
+  const [suggestOrderLimitDays, setSuggestOrderLimitDays] = useState<number>(30);
+  const [suggestDraftCartLimitDays, setSuggestDraftCartLimitDays] = useState<number>(14);
+  const [suggestDraftUseOrderLimit, setSuggestDraftUseOrderLimit] = useState<boolean>(true);
+  const [suggestDraftOrderLimitDays, setSuggestDraftOrderLimitDays] = useState<number>(30);
+  const [suggestEditing, setSuggestEditing] = useState<boolean>(false);
+  const [tpNameEditing, setTpNameEditing] = useState<boolean>(false);
+  const [tpNameDraftById, setTpNameDraftById] = useState<Record<string, string>>({});
+
+  const getTargetPageDisplayName = (tp: TargetPageSet, idx: number): string => {
+    const dn = String(tp.displayName ?? '').trim();
+    if (dn) return dn;
+    const vl = String(tp.visitsLabel ?? '').trim();
+    return vl || `Target Page ${idx + 1}`;
+  };
+
+  const getTargetPageDefaultName = (tp: TargetPageSet, idx: number): string => {
+    const vl = String(tp.visitsLabel ?? '').trim();
+    return vl || `Target Page ${idx + 1}`;
+  };
 
   const [inputParams, setInputParams] = useState<InputParams>({
     rangeDays: 30,
@@ -98,6 +122,7 @@ function App() {
 
     const first: TargetPageSet = {
       id: makeId(),
+      displayName: '',
       visitsLabel,
       cartAddLabel,
       orderLabel,
@@ -127,6 +152,11 @@ function App() {
   useEffect(() => {
     setSelectionModeTabId(null);
   }, [activeTargetPageId]);
+
+  // 결과가 바뀌면 추천 상세는 접어둔다
+  useEffect(() => {
+    setAiOpen(false);
+  }, [excludeUnspecified, targetPages]);
 
   const updateTargetPage = (id: string, patch: Partial<TargetPageSet>) => {
     setTargetPages(prev => prev.map(tp => tp.id === id ? { ...tp, ...patch } : tp));
@@ -230,7 +260,7 @@ function App() {
     const rows: ExportRow[] = [];
     targetPages.forEach((tp, idx) => {
       if (!tp.results || tp.results.length === 0) return;
-      const targetPage = (tp.visitsLabel || `Target Page ${idx + 1}`).trim();
+      const targetPage = getTargetPageDisplayName(tp, idx);
       const showCart = Boolean(tp.cartAddLabel);
       const showOrder = Boolean(tp.orderLabel);
       tp.results.forEach((r) => {
@@ -263,7 +293,8 @@ function App() {
     const selectedSet = new Set(selected);
     const showCart = Boolean(active.cartAddLabel);
     const showOrder = Boolean(active.orderLabel);
-    const targetPage = (active.visitsLabel || 'Target Page').trim();
+    const activeIdx = Math.max(0, targetPages.findIndex((tp) => tp.id === active.id));
+    const targetPage = getTargetPageDisplayName(active, activeIdx);
     return active.results
       .filter((r) => selectedSet.has(r.siteCode))
       .filter((r) => !excludeUnspecified || !isUnspecifiedSiteCode(r.siteCode))
@@ -289,7 +320,7 @@ function App() {
     const rows: ExportRow[] = [];
     targetPages.forEach((tp, idx) => {
       if (!tp.results || tp.results.length === 0) return;
-      const targetPage = (tp.visitsLabel || `Target Page ${idx + 1}`).trim();
+      const targetPage = getTargetPageDisplayName(tp, idx);
       const showCart = Boolean(tp.cartAddLabel);
       const showOrder = Boolean(tp.orderLabel);
       tp.results.forEach((r) => {
@@ -765,6 +796,289 @@ function App() {
     setSummarySelectedSiteCodes(checked ? [...allCodes] : []);
   };
 
+  const buildSuggestionDetailText = (): string => {
+    type Row = {
+      tpIndex: number;
+      tpLabel: string;
+      siteCode: string;
+      minCart: number | null;
+      minOrder: number | null;
+    };
+
+    const PRIMARY_CART_LIMIT_DAYS = 14;
+    const RELAXED_CART_LIMIT_DAYS = 30;
+    const PRIMARY_ORDER_LIMIT_DAYS = 30;
+
+    const toNumOrNull = (v: unknown): number | null => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      if (v === 'N/A' || v === '-') return null;
+      const n = Number(String(v).replace(/,/g, '').trim());
+      return Number.isFinite(n) ? n : null;
+    };
+    const norm = (n: number | null): number => (n === null || !Number.isFinite(n) || n === 0 ? Infinity : n);
+    const fmt = (n: number | null): string => (norm(n) === Infinity ? 'N/A' : `${Math.round(norm(n))}일`);
+
+    const rows: Row[] = [];
+    targetPages.forEach((tp, idx) => {
+      const tpLabel = getTargetPageDisplayName(tp, idx);
+      (tp.results ?? []).forEach((r) => {
+        if (!r?.siteCode) return;
+        if (excludeUnspecified && isUnspecifiedSiteCode(r.siteCode)) return;
+        rows.push({
+          tpIndex: idx,
+          tpLabel,
+          siteCode: r.siteCode,
+          minCart: toNumOrNull(r.minDaysForCart),
+          minOrder: toNumOrNull(r.minDaysForOrder),
+        });
+      });
+    });
+
+    const tpCount = targetPages.length;
+    if (rows.length === 0) return '• N/A';
+
+    // siteCode -> tpIndex -> row
+    const bySite = new Map<string, Map<number, Row>>();
+    rows.forEach((r) => {
+      const site = String(r.siteCode ?? '').trim();
+      if (!site) return;
+      const perTp = bySite.get(site) ?? new Map<number, Row>();
+      perTp.set(r.tpIndex, r);
+      bySite.set(site, perTp);
+    });
+
+    const pickCandidates = (cartLimitDays: number, orderLimitDays: number | null) => {
+      return Array.from(bySite.entries())
+        .map(([siteCode, perTp]) => {
+          // 조건: 모든 타겟페이지에서 Cart <= cartLimitDays (필수)
+          // + orderLimitDays가 있으면 Order <= orderLimitDays (결측/0/'-'는 탈락)
+          const cartDaysPerTp: number[] = [];
+          const orderDaysPerTpStrict: number[] = [];
+          for (let i = 0; i < tpCount; i++) {
+            const r = perTp.get(i);
+            const mc = r ? norm(r.minCart) : Infinity;
+            const mo = r ? norm(r.minOrder) : Infinity;
+            if (mc === Infinity) return null;
+            if (orderLimitDays !== null && mo === Infinity) return null;
+            cartDaysPerTp.push(mc);
+            if (orderLimitDays !== null) orderDaysPerTpStrict.push(mo);
+          }
+          const worstCart = Math.max(...cartDaysPerTp);
+          if (!(worstCart <= cartLimitDays)) return null;
+          if (orderLimitDays !== null) {
+            const worstOrderStrict = Math.max(...orderDaysPerTpStrict);
+            if (!(worstOrderStrict <= orderLimitDays)) return null;
+          }
+
+          // 부가 정렬키(Order는 참고용)
+          const orderDaysPerTp: number[] = [];
+          for (let i = 0; i < tpCount; i++) {
+            const r = perTp.get(i);
+            const mo = r ? norm(r.minOrder) : Infinity;
+            orderDaysPerTp.push(mo);
+          }
+          const worstOrder = Math.max(...orderDaysPerTp);
+          return { siteCode, perTp, worstCart, worstOrder };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (a!.worstCart - b!.worstCart) || (a!.worstOrder - b!.worstOrder) || a!.siteCode.localeCompare(b!.siteCode))
+        .slice(0, 8) as Array<{ siteCode: string; perTp: Map<number, Row>; worstCart: number; worstOrder: number }>;
+    };
+
+    let cartLimitDays = PRIMARY_CART_LIMIT_DAYS;
+    let orderLimitDays: number | null = PRIMARY_ORDER_LIMIT_DAYS;
+    let candidates = pickCandidates(cartLimitDays, orderLimitDays);
+    if (candidates.length === 0) {
+      cartLimitDays = RELAXED_CART_LIMIT_DAYS;
+      orderLimitDays = null; // N/A면 Order 조건 제거
+      candidates = pickCandidates(cartLimitDays, orderLimitDays);
+    }
+
+    const lines: string[] = [];
+    if (!candidates.length) return '• N/A';
+
+    // 사이트별 상세: Target Page별 Cart/Order 소요일
+    candidates.forEach((c) => {
+      const parts: string[] = [];
+      for (let i = 0; i < tpCount; i++) {
+        const tpLabel = getTargetPageDisplayName(targetPages[i]!, i);
+        const r = c.perTp.get(i);
+        const cart = r ? fmt(r.minCart) : 'N/A';
+        const order = r ? fmt(r.minOrder) : 'N/A';
+        parts.push(`(${tpLabel}) Cart ${cart} / Order ${order}`);
+      }
+      lines.push(`• **${c.siteCode}**: ${parts.join(' · ')}`);
+    });
+
+    return lines.join('\n');
+  };
+
+  const aiTableModel = useMemo(() => {
+    const cartLimitDays = Math.max(1, Math.floor(Number(suggestCartLimitDays) || 0));
+    const orderLimitDays = suggestUseOrderLimit
+      ? Math.max(1, Math.floor(Number(suggestOrderLimitDays) || 0))
+      : null;
+
+    const toNumOrNull = (v: unknown): number | null => {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+      if (v === 'N/A' || v === '-') return null;
+      const n = Number(String(v).replace(/,/g, '').trim());
+      return Number.isFinite(n) ? n : null;
+    };
+    const norm = (n: number | null): number => (n === null || !Number.isFinite(n) || n === 0 ? Infinity : n);
+    const fmt = (n: number | null): string => (norm(n) === Infinity ? 'N/A' : `${Math.round(norm(n))}일`);
+
+    const tpCount = targetPages.length;
+    if (tpCount === 0) {
+      return {
+        cartLimitDays: Math.max(1, Math.floor(Number(suggestCartLimitDays) || 0)) || 14,
+        orderLimitDays: suggestUseOrderLimit ? (Math.max(1, Math.floor(Number(suggestOrderLimitDays) || 0)) || 30) : null,
+        targetPages: [] as Array<{ index: number; label: string }>,
+        candidates: [] as Array<{ siteCode: string; byTp: Array<{ cart: string; order: string }> }>,
+      };
+    }
+
+    // 수집: tpIndex/label/siteCode/minCart/minOrder
+    type Row = { tpIndex: number; tpLabel: string; siteCode: string; minCart: number | null; minOrder: number | null };
+    const rows: Row[] = [];
+    targetPages.forEach((tp, idx) => {
+      const tpLabel = getTargetPageDisplayName(tp, idx);
+      (tp.results ?? []).forEach((r) => {
+        if (!r?.siteCode) return;
+        if (excludeUnspecified && isUnspecifiedSiteCode(r.siteCode)) return;
+        rows.push({
+          tpIndex: idx,
+          tpLabel,
+          siteCode: r.siteCode,
+          minCart: toNumOrNull(r.minDaysForCart),
+          minOrder: toNumOrNull(r.minDaysForOrder),
+        });
+      });
+    });
+
+    const targetPageMeta = targetPages.map((tp, idx) => ({
+      index: idx,
+      label: getTargetPageDisplayName(tp, idx),
+    }));
+
+    // siteCode -> tpIndex -> row
+    const bySite = new Map<string, Map<number, Row>>();
+    rows.forEach((r) => {
+      const site = String(r.siteCode ?? '').trim();
+      if (!site) return;
+      const perTp = bySite.get(site) ?? new Map<number, Row>();
+      perTp.set(r.tpIndex, r);
+      bySite.set(site, perTp);
+    });
+
+    const buildCandidates = (cartLimitDays: number, orderLimitDays: number | null) => {
+      return Array.from(bySite.entries())
+        .map(([siteCode, perTp]) => {
+          // 조건: 모든 TP에서 Cart <= cartLimitDays (필수)
+          // + orderLimitDays가 있으면 Order <= orderLimitDays (결측/0은 탈락)
+          const cartDaysPerTp: number[] = [];
+          const orderDaysPerTpStrict: number[] = [];
+          for (let i = 0; i < tpCount; i++) {
+            const r = perTp.get(i);
+            const mc = r ? norm(r.minCart) : Infinity;
+            const mo = r ? norm(r.minOrder) : Infinity;
+            if (mc === Infinity) return null;
+            if (orderLimitDays !== null && mo === Infinity) return null;
+            cartDaysPerTp.push(mc);
+            if (orderLimitDays !== null) orderDaysPerTpStrict.push(mo);
+          }
+          const worstCart = Math.max(...cartDaysPerTp);
+          if (worstCart > cartLimitDays) return null;
+          if (orderLimitDays !== null) {
+            const worstOrderStrict = Math.max(...orderDaysPerTpStrict);
+            if (worstOrderStrict > orderLimitDays) return null;
+          }
+
+          // 정렬키(참고): worstOrder
+          const orderDaysPerTp: number[] = [];
+          for (let i = 0; i < tpCount; i++) {
+            const r = perTp.get(i);
+            orderDaysPerTp.push(r ? norm(r.minOrder) : Infinity);
+          }
+          const worstOrder = Math.max(...orderDaysPerTp);
+
+          const byTp = targetPageMeta.map(({ index }) => {
+            const r = perTp.get(index);
+            return {
+              cart: r ? fmt(r.minCart) : 'N/A',
+              order: r ? fmt(r.minOrder) : 'N/A',
+            };
+          });
+
+          return { siteCode, worstCart, worstOrder, byTp };
+        })
+        .filter(Boolean)
+        .sort((a, b) => (a!.worstCart - b!.worstCart) || (a!.worstOrder - b!.worstOrder) || a!.siteCode.localeCompare(b!.siteCode))
+        .slice(0, 30)
+        .map((c) => ({ siteCode: c!.siteCode, byTp: c!.byTp })) as Array<{ siteCode: string; byTp: Array<{ cart: string; order: string }> }>;
+    };
+
+    const candidates = buildCandidates(cartLimitDays, orderLimitDays);
+    return { cartLimitDays, orderLimitDays, targetPages: targetPageMeta, candidates };
+  }, [excludeUnspecified, suggestCartLimitDays, suggestOrderLimitDays, suggestUseOrderLimit, targetPages]);
+
+
+
+  const renderBoldMarkdown = (text: string): React.ReactNode => {
+    // 아주 단순한 **bold** 렌더러 (AI 응답용)
+    const parts = String(text ?? '').split(/(\*\*[^*]+\*\*)/g);
+    return (
+      <>
+        {parts.map((p, i) => {
+          const m = p.match(/^\*\*([^*]+)\*\*$/);
+          if (m) return <strong key={i} style={{ fontWeight: 800 }}>{m[1]}</strong>;
+          const chunks = String(p).split('\n');
+          return (
+            <React.Fragment key={i}>
+              {chunks.map((c, j) => (
+                <React.Fragment key={j}>
+                  {c}
+                  {j < chunks.length - 1 ? <br /> : null}
+                </React.Fragment>
+              ))}
+            </React.Fragment>
+          );
+        })}
+      </>
+    );
+  };
+
+  const normalizeBulletLines = (text: string): string => {
+    const lines = String(text ?? '').split('\n');
+    const normalized = lines.map((line) => {
+      const s = String(line ?? '');
+      // "- ..." 형태로 오는 경우를 "• ..."로 통일
+      const asBullet = s.replace(/^\s*-\s+/, '• ');
+      // "•" 뒤에 공백이 없으면 추가
+      const ensuredSpace = asBullet.replace(/^\s*•(?!\s)/, '• ');
+      // 사이트 코드 표기 "**XX** - ..." -> "**XX**: ..."로 통일
+      return ensuredSpace.replace(/^(\s*•\s+\*\*[^*]+\*\*)\s*-\s+/, '$1: ');
+    });
+    return normalized.join('\n').trim();
+  };
+
+  const renderSuggestedSiteCodesInline = (): React.ReactNode => {
+    const list = aiTableModel.candidates.slice(0, 6);
+    if (list.length === 0) return 'N/A';
+    return (
+      <>
+        {list.map((c, idx) => (
+          <React.Fragment key={c.siteCode}>
+            <strong style={{ fontWeight: 900 }}>{c.siteCode}</strong>
+            {idx < list.length - 1 ? ', ' : null}
+          </React.Fragment>
+        ))}
+      </>
+    );
+  };
+
   const toggleSiteCodeSelection = (tpId: string, siteCode: string) => {
     setTargetPages((prev) => prev.map((tp) => {
       if (tp.id !== tpId) return tp;
@@ -986,7 +1300,93 @@ function App() {
                 {ctaButton('계산하기', handleCalculate, !canCalculate)}
               </>
             )}
-            {step === 3 && ctaButton('← 뒤로가기', () => setView('setup'), false, false)}
+            {step === 3 && (
+              <>
+                <button
+                  onClick={downloadResultsExcel}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '9px 14px',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    borderRadius: '10px',
+                    border: `1.5px solid ${ds.border}`,
+                    backgroundColor: ds.surface,
+                    color: ds.textPrimary,
+                    cursor: 'pointer',
+                  }}
+                >
+                  📗 전체 Excel 다운로드
+                </button>
+                {(() => {
+                  const inSelectionMode = selectionModeTabId === activeTargetPageId;
+                  const selectedCount = (() => {
+                    if (activeTargetPageId === SUMMARY_TAB_ID) return summarySelectedSiteCodes.length;
+                    const active = targetPages.find(tp => tp.id === activeTargetPageId) ?? targetPages[0];
+                    return active?.selectedSiteCodes?.length ?? 0;
+                  })();
+                  const canDownload = selectedCount > 0;
+
+                  const baseBtn: React.CSSProperties = {
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '9px 14px',
+                    fontSize: '13px',
+                    fontWeight: 800,
+                    borderRadius: '10px',
+                    border: `1.5px solid ${ds.border}`,
+                    backgroundColor: ds.surface,
+                    color: ds.textPrimary,
+                    cursor: 'pointer',
+                  };
+
+                  if (!inSelectionMode) {
+                    return (
+                      <button
+                        onClick={enterSelectionMode}
+                        style={baseBtn}
+                        title="클릭하면 국가 선택(체크박스)이 노출됩니다."
+                      >
+                        📗 선택 항목 Excel 다운로드
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <>
+                      <button
+                        onClick={() => setSelectionModeTabId(null)}
+                        style={{
+                          ...baseBtn,
+                          backgroundColor: '#f3f4f6',
+                          color: '#374151',
+                          border: '1.5px solid #d1d5db',
+                        }}
+                        title="선택 모드 취소"
+                      >
+                        취소
+                      </button>
+                      <button
+                        onClick={downloadSelectedCountryExcel}
+                        disabled={!canDownload}
+                        style={{
+                          ...baseBtn,
+                          opacity: canDownload ? 1 : 0.55,
+                          cursor: canDownload ? 'pointer' : 'not-allowed',
+                        }}
+                        title={canDownload ? '선택한 국가만 엑셀로 내려받기' : '국가를 먼저 선택해주세요'}
+                      >
+                        다운로드
+                      </button>
+                    </>
+                  );
+                })()}
+                {ctaButton('← 뒤로가기', () => setView('setup'), false, false)}
+              </>
+            )}
           </div>
         </div>
 
@@ -1131,6 +1531,7 @@ function App() {
                     onClick={() => {
                       const next: TargetPageSet = {
                         id: makeId(),
+                        displayName: '',
                         visitsLabel: '',
                         cartAddLabel: '',
                         orderLabel: '',
@@ -1189,94 +1590,337 @@ function App() {
           <section>
             {targetPages.some(tp => tp.results.length > 0) ? (
               <>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: '12px' }}>
-                  <div style={{ color: ds.textMuted, fontSize: '13px' }}>
-                    결과를 Excel로 내려받을 수 있습니다. (Target Page는 B열로 함께 저장)
+                {/* 엑셀 다운로드 CTA는 상단 스텝 바로 이동 */}
+
+                <div style={{
+                  ...card,
+                  padding: '16px 20px',
+                  marginBottom: '12px',
+                }}>
+                  <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                    {/* 좌측: 제안/코드 + 상세보기(화이트 CTA) */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', minWidth: 0 }}>
+                      <span style={{ fontSize: '16px', lineHeight: 1, flexShrink: 0 }}>✨</span>
+                      <div style={{ fontSize: '14px', fontWeight: 900, color: '#111827', minWidth: 0 }}>
+                        테스트 대상 사이트 제안 : {renderSuggestedSiteCodesInline()}
+                      </div>
+                      <button
+                        onClick={() => setAiOpen((v) => !v)}
+                        style={{
+                          padding: '6px 10px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          minWidth: '72px',
+                          textAlign: 'center',
+                          borderRadius: '999px',
+                          border: `1px solid ${ds.border}`,
+                          backgroundColor: '#fff',
+                          color: '#111827',
+                          cursor: 'pointer',
+                          marginLeft: '4px',
+                        }}
+                        title={aiOpen ? '접기' : '상세보기'}
+                      >
+                        {aiOpen ? '접기' : '상세보기'}
+                      </button>
+                    </div>
+
+                    {/* 우측: CTA 2개 + 화살표 아이콘(만) */}
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <div style={{ fontSize: '12px', fontWeight: 500, color: ds.textMuted, whiteSpace: 'nowrap', marginRight: '4px' }}>
+                        *모든 Target Page에서 Cart ≤ {aiTableModel.cartLimitDays}일
+                        {aiTableModel.orderLimitDays === null ? '' : `, Order ≤ ${aiTableModel.orderLimitDays}일`}
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSuggestEditing((prev) => {
+                            const next = !prev;
+                            if (next) {
+                              setSuggestDraftCartLimitDays(suggestCartLimitDays);
+                              setSuggestDraftUseOrderLimit(suggestUseOrderLimit);
+                              setSuggestDraftOrderLimitDays(suggestOrderLimitDays);
+                            }
+                            return next;
+                          });
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          borderRadius: '999px',
+                          border: 'none',
+                          backgroundColor: '#111827',
+                          color: '#fff',
+                          cursor: 'pointer',
+                        }}
+                        title="조건 변경"
+                      >
+                        조건 변경
+                      </button>
+                      <button
+                        onClick={() => {
+                          setTpNameEditing((prev) => {
+                            const nextOpen = !prev;
+                            if (nextOpen) {
+                              const next: Record<string, string> = {};
+                              targetPages.forEach((tp, idx) => { next[tp.id] = getTargetPageDisplayName(tp, idx); });
+                              setTpNameDraftById(next);
+                            }
+                            return nextOpen;
+                          });
+                        }}
+                        style={{
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          borderRadius: '999px',
+                          border: 'none',
+                          backgroundColor: '#111827',
+                          color: '#fff',
+                          cursor: 'pointer',
+                        }}
+                        title="타겟페이지명 수정"
+                      >
+                        타겟페이지명 수정
+                      </button>
+                      <button
+                        onClick={() => setAiOpen((v) => !v)}
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: 999,
+                          backgroundColor: '#fff',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#111827',
+                          flexShrink: 0,
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                        aria-label={aiOpen ? '접기' : '상세보기'}
+                        title={aiOpen ? '접기' : '상세보기'}
+                      >
+                        {aiOpen ? (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={downloadResultsExcel}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '9px 14px',
-                        fontSize: '13px',
-                        fontWeight: 800,
-                        borderRadius: '10px',
-                        border: `1.5px solid ${ds.border}`,
-                        backgroundColor: ds.surface,
-                        color: ds.textPrimary,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      📗 전체 Excel 다운로드
-                    </button>
-                    {(() => {
-                      const inSelectionMode = selectionModeTabId === activeTargetPageId;
-                      const selectedCount = (() => {
-                        if (activeTargetPageId === SUMMARY_TAB_ID) return summarySelectedSiteCodes.length;
-                        const active = targetPages.find(tp => tp.id === activeTargetPageId) ?? targetPages[0];
-                        return active?.selectedSiteCodes?.length ?? 0;
-                      })();
-                      const canDownload = selectedCount > 0;
 
-                      const baseBtn: React.CSSProperties = {
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '9px 14px',
-                        fontSize: '13px',
-                        fontWeight: 800,
-                        borderRadius: '10px',
-                        border: `1.5px solid ${ds.border}`,
-                        backgroundColor: ds.surface,
-                        color: ds.textPrimary,
-                        cursor: 'pointer',
-                      };
+                  {tpNameEditing && (
+                    <div style={{
+                      marginTop: '10px',
+                      padding: '10px 12px',
+                      border: `1px solid ${ds.border}`,
+                      borderRadius: '10px',
+                      backgroundColor: '#fff',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                      flexWrap: 'wrap',
+                    }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '340px' }}>
+                        {targetPages.map((tp, idx) => (
+                          <label key={tp.id} style={{ fontSize: '12px', color: ds.textMuted, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ width: '92px', color: '#374151', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                              Target {idx + 1}
+                            </span>
+                            <input
+                              value={tpNameDraftById[tp.id] ?? ''}
+                              onChange={(e) => setTpNameDraftById((prev) => ({ ...prev, [tp.id]: e.target.value }))}
+                              placeholder=""
+                              style={{
+                                flex: 1,
+                                minWidth: '220px',
+                                padding: '6px 8px',
+                                borderRadius: '8px',
+                                border: `1px solid ${ds.border}`,
+                                outline: 'none',
+                              }}
+                            />
+                          </label>
+                        ))}
+                        <div style={{ fontSize: '11px', color: ds.textMuted }}>
+                          비워두면 기본값(Visits 라벨 또는 Target Page 번호)로 표시됩니다.
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          onClick={() => {
+                            const next: Record<string, string> = {};
+                            targetPages.forEach((tp, idx) => { next[tp.id] = getTargetPageDefaultName(tp, idx); });
+                            setTpNameDraftById(next);
+                          }}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            borderRadius: '999px',
+                            border: `1px solid ${ds.border}`,
+                            backgroundColor: '#fff',
+                            color: '#374151',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          초기화
+                        </button>
+                        <button
+                          onClick={() => setTpNameEditing(false)}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            borderRadius: '999px',
+                            border: `1px solid ${ds.border}`,
+                            backgroundColor: '#f3f4f6',
+                            color: '#374151',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          취소
+                        </button>
+                        <button
+                          onClick={() => {
+                            setTargetPages((prev) => prev.map((tp, idx) => {
+                              const draft = String(tpNameDraftById[tp.id] ?? '').trim();
+                              const def = getTargetPageDefaultName(tp, idx);
+                              // 기본값과 동일하면 displayName은 비워서(=동적 기본값 유지) 저장
+                              const nextDisplayName = draft && draft !== def ? draft : '';
+                              return { ...tp, displayName: nextDisplayName };
+                            }));
+                            setTpNameEditing(false);
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            fontWeight: 900,
+                            borderRadius: '999px',
+                            border: `1px solid ${ds.border}`,
+                            backgroundColor: '#111827',
+                            color: '#fff',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          적용
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
-                      if (!inSelectionMode) {
-                        return (
-                          <button
-                            onClick={enterSelectionMode}
-                            style={baseBtn}
-                            title="클릭하면 국가 선택(체크박스)이 노출됩니다."
-                          >
-                            📗 선택 항목 Excel 다운로드
-                          </button>
-                        );
-                      }
-
-                      return (
-                        <>
-                          <button
-                            onClick={() => setSelectionModeTabId(null)}
+                  {suggestEditing && (
+                    <div style={{
+                      marginTop: '10px',
+                      padding: '10px 12px',
+                      border: `1px solid ${ds.border}`,
+                      borderRadius: '10px',
+                      backgroundColor: '#fff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      flexWrap: 'wrap',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <label style={{ fontSize: '12px', color: ds.textMuted, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                          Cart ≤
+                          <input
+                            type="number"
+                            min={1}
+                            value={suggestDraftCartLimitDays}
+                            onChange={(e) => setSuggestDraftCartLimitDays(Number(e.target.value))}
                             style={{
-                              ...baseBtn,
-                              backgroundColor: '#f3f4f6',
-                              color: '#374151',
-                              border: '1.5px solid #d1d5db',
+                              width: '72px',
+                              padding: '4px 6px',
+                              borderRadius: '8px',
+                              border: `1px solid ${ds.border}`,
+                              outline: 'none',
                             }}
-                            title="선택 모드 취소"
-                          >
-                            취소
-                          </button>
-                          <button
-                            onClick={downloadSelectedCountryExcel}
-                            disabled={!canDownload}
-                            style={{
-                              ...baseBtn,
-                              opacity: canDownload ? 1 : 0.55,
-                              cursor: canDownload ? 'pointer' : 'not-allowed',
-                            }}
-                            title={canDownload ? '선택한 국가만 엑셀로 내려받기' : '국가를 먼저 선택해주세요'}
-                          >
-                            다운로드
-                          </button>
-                        </>
-                      );
-                    })()}
-                  </div>
+                          />
+                          일
+                        </label>
+                        {suggestDraftUseOrderLimit && (
+                          <label style={{ fontSize: '12px', color: ds.textMuted, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            Order ≤
+                            <input
+                              type="number"
+                              min={1}
+                              value={suggestDraftOrderLimitDays}
+                              onChange={(e) => setSuggestDraftOrderLimitDays(Number(e.target.value))}
+                              style={{
+                                width: '72px',
+                                padding: '4px 6px',
+                                borderRadius: '8px',
+                                border: `1px solid ${ds.border}`,
+                                outline: 'none',
+                              }}
+                            />
+                            일
+                          </label>
+                        )}
+                        <div style={{ width: 6 }} />
+                        <label style={{ fontSize: '12px', color: ds.textMuted, display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                          <input
+                            type="checkbox"
+                            checked={suggestDraftUseOrderLimit}
+                            onChange={(e) => setSuggestDraftUseOrderLimit(e.target.checked)}
+                          />
+                          Order 조건 사용
+                        </label>
+                        <button
+                          onClick={() => {
+                            setSuggestEditing(false);
+                          }}
+                          style={{
+                            padding: '6px 10px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            borderRadius: '999px',
+                            border: `1px solid ${ds.border}`,
+                            backgroundColor: '#f3f4f6',
+                            color: '#374151',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          취소
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSuggestCartLimitDays(suggestDraftCartLimitDays);
+                            setSuggestUseOrderLimit(suggestDraftUseOrderLimit);
+                            setSuggestOrderLimitDays(suggestDraftOrderLimitDays);
+                            setSuggestEditing(false);
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            fontWeight: 900,
+                            borderRadius: '999px',
+                            border: `1px solid ${ds.border}`,
+                            backgroundColor: '#111827',
+                            color: '#fff',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          적용
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {aiOpen && (
+                    <div style={{ marginTop: '6px' }}>
+                      <div style={{ marginTop: '6px', paddingLeft: '26px', fontSize: '13px', color: '#374151', lineHeight: 1.55 }}>
+                        {renderBoldMarkdown(normalizeBulletLines(buildSuggestionDetailText()))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {targetPages.length > 1 && (
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
@@ -1299,7 +1943,7 @@ function App() {
                     </button>
                     {targetPages.map((tp, idx) => {
                       const isActive = activeTargetPageId === tp.id;
-                      const label = tp.visitsLabel || `Target Page ${idx + 1}`;
+                      const label = getTargetPageDisplayName(tp, idx);
                       return (
                         <button
                           key={tp.id}
@@ -1331,7 +1975,7 @@ function App() {
                   // Summary 탭: 모든 Target Page 결과를 합쳐서(Target Page 컬럼 포함) 표시
                   if (targetPages.length > 1 && activeTargetPageId === SUMMARY_TAB_ID) {
                     const summaryAll = targetPages.flatMap((tp, idx) => {
-                      const label = tp.visitsLabel || `Target Page ${idx + 1}`;
+                      const label = getTargetPageDisplayName(tp, idx);
                       return (tp.results ?? []).map((r) => ({ ...r, targetPageLabel: label, targetPageOrder: idx }));
                     });
                     const viewResults = excludeUnspecified
@@ -1379,6 +2023,7 @@ function App() {
                     />
                   );
                 })()}
+                <div style={{ height: 80 }} />
               </>
             ) : (
               <div style={{
