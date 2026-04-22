@@ -1819,6 +1819,9 @@ function App() {
                       <div style={{ marginTop: '6px', paddingLeft: '26px', fontSize: '13px', color: '#374151', lineHeight: 1.55 }}>
                         {renderBoldMarkdown(normalizeBulletLines(buildSuggestionDetailText()))}
                       </div>
+                      <div style={{ marginTop: '10px', paddingLeft: '26px', fontSize: '11px', color: '#b91c1c', lineHeight: 1.45 }}>
+                        *[대상 사이트 선정 시 참고] <strong>br</strong>: buying page 저니 상이 (shop PD) / <strong>de</strong>: 잦은 flickering 이슈 발생
+                      </div>
                     </div>
                   )}
                 </div>
