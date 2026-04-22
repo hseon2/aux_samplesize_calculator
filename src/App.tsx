@@ -797,120 +797,20 @@ function App() {
   };
 
   const buildSuggestionDetailText = (): string => {
-    type Row = {
-      tpIndex: number;
-      tpLabel: string;
-      siteCode: string;
-      minCart: number | null;
-      minOrder: number | null;
-    };
-
-    const PRIMARY_CART_LIMIT_DAYS = 14;
-    const RELAXED_CART_LIMIT_DAYS = 30;
-    const PRIMARY_ORDER_LIMIT_DAYS = 30;
-
-    const toNumOrNull = (v: unknown): number | null => {
-      if (v === null || v === undefined) return null;
-      if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-      if (v === 'N/A' || v === '-') return null;
-      const n = Number(String(v).replace(/,/g, '').trim());
-      return Number.isFinite(n) ? n : null;
-    };
-    const norm = (n: number | null): number => (n === null || !Number.isFinite(n) || n === 0 ? Infinity : n);
-    const fmt = (n: number | null): string => (norm(n) === Infinity ? 'N/A' : `${Math.round(norm(n))}일`);
-
-    const rows: Row[] = [];
-    targetPages.forEach((tp, idx) => {
-      const tpLabel = getTargetPageDisplayName(tp, idx);
-      (tp.results ?? []).forEach((r) => {
-        if (!r?.siteCode) return;
-        if (excludeUnspecified && isUnspecifiedSiteCode(r.siteCode)) return;
-        rows.push({
-          tpIndex: idx,
-          tpLabel,
-          siteCode: r.siteCode,
-          minCart: toNumOrNull(r.minDaysForCart),
-          minOrder: toNumOrNull(r.minDaysForOrder),
-        });
-      });
-    });
-
-    const tpCount = targetPages.length;
-    if (rows.length === 0) return '• N/A';
-
-    // siteCode -> tpIndex -> row
-    const bySite = new Map<string, Map<number, Row>>();
-    rows.forEach((r) => {
-      const site = String(r.siteCode ?? '').trim();
-      if (!site) return;
-      const perTp = bySite.get(site) ?? new Map<number, Row>();
-      perTp.set(r.tpIndex, r);
-      bySite.set(site, perTp);
-    });
-
-    const pickCandidates = (cartLimitDays: number, orderLimitDays: number | null) => {
-      return Array.from(bySite.entries())
-        .map(([siteCode, perTp]) => {
-          // 조건: 모든 타겟페이지에서 Cart <= cartLimitDays (필수)
-          // + orderLimitDays가 있으면 Order <= orderLimitDays (결측/0/'-'는 탈락)
-          const cartDaysPerTp: number[] = [];
-          const orderDaysPerTpStrict: number[] = [];
-          for (let i = 0; i < tpCount; i++) {
-            const r = perTp.get(i);
-            const mc = r ? norm(r.minCart) : Infinity;
-            const mo = r ? norm(r.minOrder) : Infinity;
-            if (mc === Infinity) return null;
-            if (orderLimitDays !== null && mo === Infinity) return null;
-            cartDaysPerTp.push(mc);
-            if (orderLimitDays !== null) orderDaysPerTpStrict.push(mo);
-          }
-          const worstCart = Math.max(...cartDaysPerTp);
-          if (!(worstCart <= cartLimitDays)) return null;
-          if (orderLimitDays !== null) {
-            const worstOrderStrict = Math.max(...orderDaysPerTpStrict);
-            if (!(worstOrderStrict <= orderLimitDays)) return null;
-          }
-
-          // 부가 정렬키(Order는 참고용)
-          const orderDaysPerTp: number[] = [];
-          for (let i = 0; i < tpCount; i++) {
-            const r = perTp.get(i);
-            const mo = r ? norm(r.minOrder) : Infinity;
-            orderDaysPerTp.push(mo);
-          }
-          const worstOrder = Math.max(...orderDaysPerTp);
-          return { siteCode, perTp, worstCart, worstOrder };
-        })
-        .filter(Boolean)
-        .sort((a, b) => (a!.worstCart - b!.worstCart) || (a!.worstOrder - b!.worstOrder) || a!.siteCode.localeCompare(b!.siteCode))
-        .slice(0, 8) as Array<{ siteCode: string; perTp: Map<number, Row>; worstCart: number; worstOrder: number }>;
-    };
-
-    let cartLimitDays = PRIMARY_CART_LIMIT_DAYS;
-    let orderLimitDays: number | null = PRIMARY_ORDER_LIMIT_DAYS;
-    let candidates = pickCandidates(cartLimitDays, orderLimitDays);
-    if (candidates.length === 0) {
-      cartLimitDays = RELAXED_CART_LIMIT_DAYS;
-      orderLimitDays = null; // N/A면 Order 조건 제거
-      candidates = pickCandidates(cartLimitDays, orderLimitDays);
-    }
+    const candidates = aiTableModel.candidates ?? [];
+    const tps = aiTableModel.targetPages ?? [];
+    if (!candidates.length || !tps.length) return '• N/A';
 
     const lines: string[] = [];
-    if (!candidates.length) return '• N/A';
-
-    // 사이트별 상세: Target Page별 Cart/Order 소요일
-    candidates.forEach((c) => {
-      const parts: string[] = [];
-      for (let i = 0; i < tpCount; i++) {
-        const tpLabel = getTargetPageDisplayName(targetPages[i]!, i);
-        const r = c.perTp.get(i);
-        const cart = r ? fmt(r.minCart) : 'N/A';
-        const order = r ? fmt(r.minOrder) : 'N/A';
-        parts.push(`(${tpLabel}) Cart ${cart} / Order ${order}`);
-      }
+    candidates.slice(0, 8).forEach((c) => {
+      const parts = tps.map((tp, idx) => {
+        const v = c.byTp?.[idx];
+        const cart = v?.cart ?? 'N/A';
+        const order = v?.order ?? 'N/A';
+        return `(${tp.label}) Cart ${cart} / Order ${order}`;
+      });
       lines.push(`• **${c.siteCode}**: ${parts.join(' · ')}`);
     });
-
     return lines.join('\n');
   };
 
