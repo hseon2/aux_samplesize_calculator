@@ -34,6 +34,17 @@ export interface FetchV1DataParams {
   v1_limit?: number;
 }
 
+export interface ScenarioGenerateRequest {
+  objective: string;
+  hypothesis: string;
+}
+
+export interface ScenarioGenerateResponse {
+  objective_en: string;
+  hypothesis_en: string;
+  model?: string;
+}
+
 /**
  * AA API 옵션 목록 조회 (GET /api/options)
  */
@@ -75,6 +86,27 @@ export async function fetchV1Data(
   }
   const rows: V1DataRow[] = (data as { rows?: V1DataRow[] }).rows ?? [];
   return apiRowsToRawData(rows);
+}
+
+export async function generateScenario(
+  params: ScenarioGenerateRequest,
+  baseUrl?: string
+): Promise<ScenarioGenerateResponse> {
+  const url = `${baseUrl ?? getBaseUrl()}/api/scenario`;
+  const body = {
+    objective: String(params.objective ?? '').trim(),
+    hypothesis: String(params.hypothesis ?? '').trim(),
+  };
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `시나리오 생성 실패 (${res.status})`);
+  }
+  return data as ScenarioGenerateResponse;
 }
 
 /** API 응답 rows → RawDataRow[] (파일 업로드와 동일한 구조) */

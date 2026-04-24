@@ -7,6 +7,7 @@ import { InputForm, InputParams } from './components/InputForm';
 import { SegmentSelector } from './components/SegmentSelector';
 import { ResultTable } from './components/ResultTable';
 import { MilestoneCalculator } from './components/MilestoneCalculator';
+import { ScenarioGenerator } from './components/ScenarioGenerator';
 import { 
   RawDataRow, 
   extractSegmentLabels, 
@@ -56,7 +57,7 @@ function App() {
   const [error, setError] = useState<string>('');
   const [view, setView] = useState<'setup' | 'result'>('setup');
   const [dataSource, setDataSource] = useState<'file' | 'api'>('file');
-  const [activeTool, setActiveTool] = useState<'sample-size' | 'milestone'>('sample-size');
+  const [activeTool, setActiveTool] = useState<'sample-size' | 'milestone' | 'scenario'>('sample-size');
 
   /** true면 Site Code가 Unspecified인 행을 표/엑셀에서 제외 (기본: 제외) */
   const [excludeUnspecified, setExcludeUnspecified] = useState(true);
@@ -1128,7 +1129,11 @@ function App() {
             color: '#f9fafb',
             letterSpacing: '-0.02em',
           }}>
-            {activeTool === 'milestone' ? 'AUX Milestone Calculator' : 'AUX AB Test Sample Size Calculator'}
+            {activeTool === 'milestone'
+              ? 'AUX Milestone Calculator'
+              : activeTool === 'scenario'
+                ? 'AUX Scenario Generator'
+                : 'AUX AB Test Sample Size Calculator'}
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
             <button
@@ -1142,6 +1147,16 @@ function App() {
               style={toolTabStyle('milestone')}
             >
               Milestone
+            </button>
+            <button
+              onClick={() => setActiveTool('scenario')}
+              style={{
+                ...toolTabStyle('sample-size'),
+                border: `1px solid ${activeTool === 'scenario' ? '#93c5fd' : '#4b5563'}`,
+                backgroundColor: activeTool === 'scenario' ? '#1d4ed8' : 'transparent',
+              }}
+            >
+              Scenario
             </button>
           </div>
         </div>
@@ -1946,8 +1961,10 @@ function App() {
           </section>
         )}
           </>
-        ) : (
+        ) : activeTool === 'milestone' ? (
           <MilestoneCalculator />
+        ) : (
+          <ScenarioGenerator cardStyle={card} />
         )}
       </main>
     </div>
